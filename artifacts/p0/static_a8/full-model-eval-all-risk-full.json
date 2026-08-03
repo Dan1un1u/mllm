@@ -1,0 +1,32 @@
+{
+  "a16_tensor_count": 62,
+  "a8_tensor_count": 134,
+  "complete": true,
+  "held_out_indices": [
+    90,
+    74,
+    78,
+    80,
+    50,
+    56
+  ],
+  "model": "/home/daniuniu/llm_exp/models/Qwen3-origin",
+  "purpose": "P0 composed full-model W4A16/W4A8 oracle",
+  "schema_version": 1,
+  "variants": {
+    "mixed": {
+      "last_token_logits": {
+        "cosine": 0.8947876691818237,
+        "nmse": 0.20026925206184387,
+        "top1_agreement": 1.0
+      }
+    },
+    "w4a16": {
+      "last_token_logits": {
+        "cosine": 0.9168660640716553,
+        "nmse": 0.15937797725200653,
+        "top1_agreement": 1.0
+      }
+    }
+  }
+}

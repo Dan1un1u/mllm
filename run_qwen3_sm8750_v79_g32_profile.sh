@@ -24,6 +24,20 @@ RESULT_ROOT="${RESULTS_BASE}/qwen3_sm8750_v79_g32_${TIMESTAMP}"
 REMOTE_DIR="${REMOTE_DIR:-/data/local/tmp}"
 REMOTE_ROOT="${REMOTE_ROOT:-${REMOTE_DIR}/qwen3_sm8750_v79_g32_profile_${TIMESTAMP}}"
 ADB_SERIAL="${ADB_SERIAL:-}"
+ADB_BIN="${ADB_BIN:-adb}"
+
+# The standalone runner is also used by scheme-specific wrappers.  Keep the
+# actual context/profile contract explicit in the result directory rather than
+# silently labelling every run as the archived native baseline.
+PROFILE_SCHEME="${PROFILE_SCHEME:-native_g32_baseline}"
+PROFILE_WRAPPER="${PROFILE_WRAPPER:-${BASH_SOURCE[0]}}"
+STREAMING_SCALE_DIR="${STREAMING_SCALE_DIR:-}"
+STREAMING_MANIFEST="${STREAMING_MANIFEST:-}"
+PRECISION_MAP="${PRECISION_MAP:-}"
+NATIVE_CONTEXT_PROVENANCE="${NATIVE_CONTEXT_PROVENANCE:-}"
+OFFLINE_LOGITS_COSINE="${OFFLINE_LOGITS_COSINE:-}"
+OFFLINE_TOP1_AGREEMENT="${OFFLINE_TOP1_AGREEMENT:-}"
+OFFLINE_LOGITS_NMSE="${OFFLINE_LOGITS_NMSE:-}"
 
 BUILD_ANDROID="${BUILD_ANDROID:-1}"
 PREPARE_DEVICE="${PREPARE_DEVICE:-1}"
@@ -64,7 +78,7 @@ if (( ACCURACY_MAX_NEW_TOKENS < 32 )); then
     echo "WARNING: ACCURACY_MAX_NEW_TOKENS=${ACCURACY_MAX_NEW_TOKENS} is likely to truncate answers;"
     echo "         use 64 or more for a meaningful accuracy sanity score."
 fi
-command -v adb >/dev/null || die "adb is not in PATH"
+command -v "${ADB_BIN}" >/dev/null || die "${ADB_BIN} is not in PATH"
 command -v python3 >/dev/null || die "python3 is not in PATH"
 [[ ! -e "${RESULT_ROOT}" ]] || die "timestamped result directory already exists: ${RESULT_ROOT}"
 
@@ -77,7 +91,7 @@ for graph in s1 s32; do
         || die "schematic missing: ${SCHEMATIC_DIR}/model.0.${graph}_schematic.bin"
 done
 
-ADB=(adb)
+ADB=("${ADB_BIN}")
 if [[ -n "${ADB_SERIAL}" ]]; then
     ADB+=(-s "${ADB_SERIAL}")
 fi
@@ -97,7 +111,8 @@ LOCAL_CONTEXT_SHA="$(sha256sum "${LOCAL_MODEL}" | awk '{print $1}')"
     || die "G32 V79 context SHA mismatch: expected ${EXPECTED_CONTEXT_SHA}, got ${LOCAL_CONTEXT_SHA}"
 
 mkdir -p "${RESULT_ROOT}/benchmark" "${RESULT_ROOT}/accuracy"
-cp "${BASH_SOURCE[0]}" "${RESULT_ROOT}/experiment_script.sh"
+cp "${PROFILE_WRAPPER}" "${RESULT_ROOT}/experiment_script.sh"
+cp "${BASH_SOURCE[0]}" "${RESULT_ROOT}/base_profile_script.sh"
 cp "${ACCURACY_SUITE}" "${RESULT_ROOT}/accuracy/accuracy_suite.tsv"
 git -C "${REPO_ROOT}" rev-parse HEAD >"${RESULT_ROOT}/git_commit.txt"
 git -C "${REPO_ROOT}" status --short >"${RESULT_ROOT}/git_status.txt"
@@ -105,12 +120,30 @@ sha256sum "${LOCAL_RUNNER}" "${LOCAL_MODEL}" "${LOCAL_TOKENIZER}" "${LOCAL_CONFI
     "${ACCURACY_SUITE}" \
     "${SCHEMATIC_DIR}/model.0.s1_schematic.bin" "${SCHEMATIC_DIR}/model.0.s32_schematic.bin" \
     >"${RESULT_ROOT}/artifact_sha256.txt"
+if [[ -n "${STREAMING_SCALE_DIR}" && -d "${STREAMING_SCALE_DIR}" ]]; then
+    find "${STREAMING_SCALE_DIR}" -maxdepth 1 -type f -name 'layer*-lpbq-scales.safetensors' \
+        -print0 | sort -z | xargs -0 sha256sum >"${RESULT_ROOT}/streaming_scale_sha256.txt"
+fi
+for metadata_file in "${STREAMING_MANIFEST}" "${PRECISION_MAP}"; do
+    if [[ -n "${metadata_file}" && -f "${metadata_file}" ]]; then
+        sha256sum "${metadata_file}" >>"${RESULT_ROOT}/artifact_sha256.txt"
+    fi
+done
 "${ADB[@]}" shell getprop >"${RESULT_ROOT}/device_getprop.txt"
 
 {
     echo "timestamp=${TIMESTAMP}"
     echo "result_root=${RESULT_ROOT}"
     echo "capture_context=SM8750 native V79 G32"
+    echo "profile_scheme=${PROFILE_SCHEME}"
+    echo "profile_wrapper=${PROFILE_WRAPPER}"
+    echo "streaming_scale_dir=${STREAMING_SCALE_DIR}"
+    echo "streaming_manifest=${STREAMING_MANIFEST}"
+    echo "precision_map=${PRECISION_MAP}"
+    echo "native_context_provenance=${NATIVE_CONTEXT_PROVENANCE}"
+    echo "offline_logits_cosine=${OFFLINE_LOGITS_COSINE}"
+    echo "offline_top1_agreement=${OFFLINE_TOP1_AGREEMENT}"
+    echo "offline_logits_nmse=${OFFLINE_LOGITS_NMSE}"
     echo "context_sha256=${EXPECTED_CONTEXT_SHA}"
     echo "qairt_sdk_root=${QAIRT_SDK_ROOT}"
     echo "benchmark_runs=${BENCHMARK_RUNS}"

@@ -1,0 +1,839 @@
+{
+  "complete": true,
+  "force_a16": [],
+  "held_out_indices": [
+    90,
+    74,
+    78,
+    80,
+    50,
+    56
+  ],
+  "layers": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27
+  ],
+  "model": "/home/daniuniu/llm_exp/models/Qwen3-origin",
+  "purpose": "P0 block-output and logits gate",
+  "rows": [
+    {
+      "layer": 0,
+      "selected_a16_fallbacks": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 0.9836647510528564,
+          "nmse": 0.03241153061389923
+        },
+        "last_token_logits": {
+          "cosine": 0.9921530485153198,
+          "nmse": 0.01578580029308796,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 0.9836647510528564,
+          "nmse": 0.03241153061389923
+        },
+        "last_token_logits": {
+          "cosine": 0.9921530485153198,
+          "nmse": 0.01578580029308796,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 1,
+      "selected_a16_fallbacks": [
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 0.9953509569168091,
+          "nmse": 0.009284276515245438
+        },
+        "last_token_logits": {
+          "cosine": 0.9939835667610168,
+          "nmse": 0.011873483657836914,
+          "top1_agreement": 0.8333333134651184
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 0.9954391717910767,
+          "nmse": 0.009166019968688488
+        },
+        "last_token_logits": {
+          "cosine": 0.9922244548797607,
+          "nmse": 0.015405271202325821,
+          "top1_agreement": 0.8333333134651184
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "selected_a16_fallbacks": [
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 0.9996541142463684,
+          "nmse": 0.0007661604904569685
+        },
+        "last_token_logits": {
+          "cosine": 0.984312117099762,
+          "nmse": 0.031036527827382088,
+          "top1_agreement": 0.8333333134651184
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 0.999653160572052,
+          "nmse": 0.0007682011346332729
+        },
+        "last_token_logits": {
+          "cosine": 0.9859493374824524,
+          "nmse": 0.027765624225139618,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 3,
+      "selected_a16_fallbacks": [
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 1.4934191767679295e-06
+        },
+        "last_token_logits": {
+          "cosine": 0.9942060708999634,
+          "nmse": 0.011460856534540653,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 1.2556117781059584e-06
+        },
+        "last_token_logits": {
+          "cosine": 0.9960939288139343,
+          "nmse": 0.0076874736696481705,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 4,
+      "selected_a16_fallbacks": [
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 1.7937001075551962e-06
+        },
+        "last_token_logits": {
+          "cosine": 0.9955930709838867,
+          "nmse": 0.008624319918453693,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 1.499694917583838e-06
+        },
+        "last_token_logits": {
+          "cosine": 0.9946739673614502,
+          "nmse": 0.01052602007985115,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 5,
+      "selected_a16_fallbacks": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 2.136658395102131e-06
+        },
+        "last_token_logits": {
+          "cosine": 0.9903906583786011,
+          "nmse": 0.019042110070586205,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 2.136658395102131e-06
+        },
+        "last_token_logits": {
+          "cosine": 0.9903906583786011,
+          "nmse": 0.019042110070586205,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 6,
+      "selected_a16_fallbacks": [],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 4.161845936323516e-06
+        },
+        "last_token_logits": {
+          "cosine": 0.991441011428833,
+          "nmse": 0.017217040061950684,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 2.553268359406502e-06
+        },
+        "last_token_logits": {
+          "cosine": 0.9911268353462219,
+          "nmse": 0.01759619452059269,
+          "top1_agreement": 0.8333333134651184
+        }
+      }
+    },
+    {
+      "layer": 7,
+      "selected_a16_fallbacks": [
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 4.804243417311227e-06
+        },
+        "last_token_logits": {
+          "cosine": 0.9907921552658081,
+          "nmse": 0.018210945650935173,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 3.2754853691585595e-06
+        },
+        "last_token_logits": {
+          "cosine": 0.9890952706336975,
+          "nmse": 0.02178809978067875,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 8,
+      "selected_a16_fallbacks": [],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 5.858566510141827e-06
+        },
+        "last_token_logits": {
+          "cosine": 0.9920830726623535,
+          "nmse": 0.015686023980379105,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 3.831343292404199e-06
+        },
+        "last_token_logits": {
+          "cosine": 0.996229350566864,
+          "nmse": 0.007403586991131306,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 9,
+      "selected_a16_fallbacks": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 6.30973272564006e-06
+        },
+        "last_token_logits": {
+          "cosine": 0.9937883615493774,
+          "nmse": 0.012239234521985054,
+          "top1_agreement": 0.8333333134651184
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 6.30973272564006e-06
+        },
+        "last_token_logits": {
+          "cosine": 0.9937883615493774,
+          "nmse": 0.012239234521985054,
+          "top1_agreement": 0.8333333134651184
+        }
+      }
+    },
+    {
+      "layer": 10,
+      "selected_a16_fallbacks": [
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 1.2536295798781794e-05
+        },
+        "last_token_logits": {
+          "cosine": 0.9959496855735779,
+          "nmse": 0.007936195470392704,
+          "top1_agreement": 0.8333333134651184
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 1.035847617458785e-05
+        },
+        "last_token_logits": {
+          "cosine": 0.9973665475845337,
+          "nmse": 0.005123412236571312,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 11,
+      "selected_a16_fallbacks": [
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 1.8396707673673518e-05
+        },
+        "last_token_logits": {
+          "cosine": 0.9946151971817017,
+          "nmse": 0.010674729011952877,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 1.4497291886073072e-05
+        },
+        "last_token_logits": {
+          "cosine": 0.9962962865829468,
+          "nmse": 0.007224163040518761,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 12,
+      "selected_a16_fallbacks": [],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 1.7074075003620237e-05
+        },
+        "last_token_logits": {
+          "cosine": 0.9905366897583008,
+          "nmse": 0.018689120188355446,
+          "top1_agreement": 0.8333333134651184
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 1.2365449947537854e-05
+        },
+        "last_token_logits": {
+          "cosine": 0.9972409009933472,
+          "nmse": 0.005369845312088728,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 13,
+      "selected_a16_fallbacks": [],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 2.4057937480392866e-05
+        },
+        "last_token_logits": {
+          "cosine": 0.996585488319397,
+          "nmse": 0.0067131235264241695,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 1.835666444094386e-05
+        },
+        "last_token_logits": {
+          "cosine": 0.9965571761131287,
+          "nmse": 0.0067806304432451725,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 14,
+      "selected_a16_fallbacks": [
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 3.356127854203805e-05
+        },
+        "last_token_logits": {
+          "cosine": 0.9962389469146729,
+          "nmse": 0.0073798540979623795,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 2.3897458959254436e-05
+        },
+        "last_token_logits": {
+          "cosine": 0.9971619844436646,
+          "nmse": 0.0056038424372673035,
+          "top1_agreement": 0.8333333134651184
+        }
+      }
+    },
+    {
+      "layer": 15,
+      "selected_a16_fallbacks": [],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 6.520285387523472e-05
+        },
+        "last_token_logits": {
+          "cosine": 0.9914128184318542,
+          "nmse": 0.016988448798656464,
+          "top1_agreement": 0.8333333134651184
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 3.632054722402245e-05
+        },
+        "last_token_logits": {
+          "cosine": 0.9945935010910034,
+          "nmse": 0.010768291540443897,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 16,
+      "selected_a16_fallbacks": [],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 9.998694440582767e-05
+        },
+        "last_token_logits": {
+          "cosine": 0.9948257207870483,
+          "nmse": 0.010201038792729378,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 7.38126109354198e-05
+        },
+        "last_token_logits": {
+          "cosine": 0.9959670305252075,
+          "nmse": 0.007919475436210632,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 17,
+      "selected_a16_fallbacks": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 0.00012297931243665516
+        },
+        "last_token_logits": {
+          "cosine": 0.9951379895210266,
+          "nmse": 0.009558123536407948,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 0.00012297931243665516
+        },
+        "last_token_logits": {
+          "cosine": 0.9951379895210266,
+          "nmse": 0.009558123536407948,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 18,
+      "selected_a16_fallbacks": [],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 0.99998939037323,
+          "nmse": 0.00023904761474113911
+        },
+        "last_token_logits": {
+          "cosine": 0.9959129095077515,
+          "nmse": 0.008010800927877426,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 1.0,
+          "nmse": 0.00016013866115827113
+        },
+        "last_token_logits": {
+          "cosine": 0.9971363544464111,
+          "nmse": 0.005589260254055262,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 19,
+      "selected_a16_fallbacks": [],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 0.9998612403869629,
+          "nmse": 0.00045866091386415064
+        },
+        "last_token_logits": {
+          "cosine": 0.995023250579834,
+          "nmse": 0.009777473285794258,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 0.9999414086341858,
+          "nmse": 0.0003024784673471004
+        },
+        "last_token_logits": {
+          "cosine": 0.9968582987785339,
+          "nmse": 0.006134393624961376,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 20,
+      "selected_a16_fallbacks": [],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 0.9997768998146057,
+          "nmse": 0.0006001266883686185
+        },
+        "last_token_logits": {
+          "cosine": 0.9960489273071289,
+          "nmse": 0.007803334388881922,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 0.9998565912246704,
+          "nmse": 0.0004402807098813355
+        },
+        "last_token_logits": {
+          "cosine": 0.9967547655105591,
+          "nmse": 0.006497776601463556,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 21,
+      "selected_a16_fallbacks": [],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 0.9996726512908936,
+          "nmse": 0.000770903192460537
+        },
+        "last_token_logits": {
+          "cosine": 0.9950117468833923,
+          "nmse": 0.010157356038689613,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 0.9997846484184265,
+          "nmse": 0.0005481152329593897
+        },
+        "last_token_logits": {
+          "cosine": 0.9956122040748596,
+          "nmse": 0.009095041081309319,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 22,
+      "selected_a16_fallbacks": [
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 0.9996774196624756,
+          "nmse": 0.0007358515285886824
+        },
+        "last_token_logits": {
+          "cosine": 0.9971092343330383,
+          "nmse": 0.005646153353154659,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 0.9997223615646362,
+          "nmse": 0.0006436007679440081
+        },
+        "last_token_logits": {
+          "cosine": 0.9978387951850891,
+          "nmse": 0.004159164149314165,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 23,
+      "selected_a16_fallbacks": [],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 0.9994310736656189,
+          "nmse": 0.001214381423778832
+        },
+        "last_token_logits": {
+          "cosine": 0.9975928664207458,
+          "nmse": 0.004658827558159828,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 0.9996047019958496,
+          "nmse": 0.0008627582574263215
+        },
+        "last_token_logits": {
+          "cosine": 0.9980891942977905,
+          "nmse": 0.0036968798376619816,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 24,
+      "selected_a16_fallbacks": [],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 0.9992654323577881,
+          "nmse": 0.0015072367386892438
+        },
+        "last_token_logits": {
+          "cosine": 0.9970177412033081,
+          "nmse": 0.0058979010209441185,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 0.9994505643844604,
+          "nmse": 0.0011419863440096378
+        },
+        "last_token_logits": {
+          "cosine": 0.9983143210411072,
+          "nmse": 0.0032203844748437405,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 25,
+      "selected_a16_fallbacks": [],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 0.9991771578788757,
+          "nmse": 0.0016810772940516472
+        },
+        "last_token_logits": {
+          "cosine": 0.9974950551986694,
+          "nmse": 0.004861983936280012,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 0.9993306994438171,
+          "nmse": 0.0013714124215766788
+        },
+        "last_token_logits": {
+          "cosine": 0.9976650476455688,
+          "nmse": 0.004504668992012739,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 26,
+      "selected_a16_fallbacks": [],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 0.9990251660346985,
+          "nmse": 0.001965970266610384
+        },
+        "last_token_logits": {
+          "cosine": 0.991659939289093,
+          "nmse": 0.01646288111805916,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 0.9992785453796387,
+          "nmse": 0.0014587618643417954
+        },
+        "last_token_logits": {
+          "cosine": 0.9956194162368774,
+          "nmse": 0.009396418929100037,
+          "top1_agreement": 1.0
+        }
+      }
+    },
+    {
+      "layer": 27,
+      "selected_a16_fallbacks": [
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 0.9663168787956238,
+          "nmse": 0.08188262581825256
+        },
+        "last_token_logits": {
+          "cosine": 0.9936684966087341,
+          "nmse": 0.012522568926215172,
+          "top1_agreement": 1.0
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 0.9660497307777405,
+          "nmse": 0.08175919204950333
+        },
+        "last_token_logits": {
+          "cosine": 0.9934601187705994,
+          "nmse": 0.01289305929094553,
+          "top1_agreement": 1.0
+        }
+      }
+    }
+  ],
+  "schema_version": 1,
+  "variants": {
+    "selected_mixed": "target layer G32 LPBQ with sensitivity-map A8/A16 map",
+    "w4a16": "target layer G32 LPBQ weights, A16 inputs"
+  }
+}

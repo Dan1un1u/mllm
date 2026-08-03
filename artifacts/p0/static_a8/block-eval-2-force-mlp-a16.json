@@ -1,0 +1,58 @@
+{
+  "complete": true,
+  "force_a16": [
+    "down_proj",
+    "gate_proj",
+    "up_proj"
+  ],
+  "held_out_indices": [
+    90,
+    74,
+    78,
+    80,
+    50,
+    56
+  ],
+  "layers": [
+    2
+  ],
+  "model": "/home/daniuniu/llm_exp/models/Qwen3-origin",
+  "purpose": "P0 block-output and logits gate",
+  "rows": [
+    {
+      "layer": 2,
+      "selected_a16_fallbacks": [
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "selected_mixed": {
+        "block_output": {
+          "cosine": 0.9996541142463684,
+          "nmse": 0.0007661604904569685
+        },
+        "last_token_logits": {
+          "cosine": 0.984312117099762,
+          "nmse": 0.031036527827382088,
+          "top1_agreement": 0.8333333134651184
+        }
+      },
+      "w4a16": {
+        "block_output": {
+          "cosine": 0.999653160572052,
+          "nmse": 0.0007682011346332729
+        },
+        "last_token_logits": {
+          "cosine": 0.9859493374824524,
+          "nmse": 0.027765624225139618,
+          "top1_agreement": 1.0
+        }
+      }
+    }
+  ],
+  "schema_version": 1,
+  "variants": {
+    "selected_mixed": "target layer G32 LPBQ with sensitivity-map A8/A16 map",
+    "w4a16": "target layer G32 LPBQ weights, A16 inputs"
+  }
+}

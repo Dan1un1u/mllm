@@ -1,0 +1,183 @@
+{
+  "candidates": {
+    "learnable_percentile_99.9": {
+      "metrics": {
+        "activation_cosine": 0.9831159114837646,
+        "activation_nmse": 0.033501915633678436,
+        "output_cosine": 0.9880476593971252,
+        "output_nmse": 0.02383364364504814
+      },
+      "optimization": {
+        "final_loss": 0.023816360160708427,
+        "initial_loss": 0.18926332890987396,
+        "steps": 100
+      },
+      "params": {
+        "clip_max": 11.160611242055893,
+        "clip_min": -8.741178035736084,
+        "method": "learnable",
+        "percentile": 99.9,
+        "quant_max": 255,
+        "quant_min": 0,
+        "scale": 0.07804623246192932,
+        "warm_start_method": "percentile",
+        "zero_point": 112
+      },
+      "saturation_fraction": 5.086263172415784e-06
+    },
+    "max_min": {
+      "metrics": {
+        "activation_cosine": 0.9843947887420654,
+        "activation_nmse": 0.03151598945260048,
+        "output_cosine": 0.9884159564971924,
+        "output_nmse": 0.02319706231355667
+      },
+      "params": {
+        "clip_max": 18.90906862745098,
+        "clip_min": -8.02843137254902,
+        "method": "max_min",
+        "percentile": null,
+        "quant_max": 255,
+        "quant_min": 0,
+        "scale": 0.10563725490196078,
+        "warm_start_method": null,
+        "zero_point": 76
+      },
+      "saturation_fraction": 5.086263172415784e-06
+    },
+    "mean_3sigma": {
+      "metrics": {
+        "activation_cosine": 0.7343147993087769,
+        "activation_nmse": 0.4901007115840912,
+        "output_cosine": 0.8018824458122253,
+        "output_nmse": 0.4071304202079773
+      },
+      "params": {
+        "clip_max": 0.4233044343836167,
+        "clip_min": -0.4199973684899947,
+        "method": "mean_3sigma",
+        "percentile": null,
+        "quant_max": 255,
+        "quant_min": 0,
+        "scale": 0.0033070658936220055,
+        "warm_start_method": null,
+        "zero_point": 127
+      },
+      "saturation_fraction": 0.010843913070857525
+    },
+    "percentile_99": {
+      "metrics": {
+        "activation_cosine": 0.7403264045715332,
+        "activation_nmse": 0.48055821657180786,
+        "output_cosine": 0.8069729208946228,
+        "output_nmse": 0.39747047424316406
+      },
+      "params": {
+        "clip_max": 0.45352328431372546,
+        "clip_min": -0.4292892156862745,
+        "method": "percentile",
+        "percentile": 99.0,
+        "quant_max": 255,
+        "quant_min": 0,
+        "scale": 0.0034620098039215685,
+        "warm_start_method": null,
+        "zero_point": 124
+      },
+      "saturation_fraction": 0.00998518243432045
+    },
+    "percentile_99.9": {
+      "metrics": {
+        "activation_cosine": 0.8742100596427917,
+        "activation_nmse": 0.2510511875152588,
+        "output_cosine": 0.9105974435806274,
+        "output_nmse": 0.19159436225891113
+      },
+      "params": {
+        "clip_max": 1.6195668977849624,
+        "clip_min": -1.268471975887523,
+        "method": "percentile",
+        "percentile": 99.9,
+        "quant_max": 255,
+        "quant_min": 0,
+        "scale": 0.011325642641852884,
+        "warm_start_method": null,
+        "zero_point": 112
+      },
+      "saturation_fraction": 0.0010113186435773969
+    },
+    "percentile_99.99": {
+      "metrics": {
+        "activation_cosine": 0.9665483236312866,
+        "activation_nmse": 0.06833384186029434,
+        "output_cosine": 0.9777565598487854,
+        "output_nmse": 0.046873822808265686
+      },
+      "params": {
+        "clip_max": 5.80064300368814,
+        "clip_min": -3.620783530964571,
+        "method": "percentile",
+        "percentile": 99.99,
+        "quant_max": 255,
+        "quant_min": 0,
+        "scale": 0.036946770724128275,
+        "warm_start_method": null,
+        "zero_point": 98
+      },
+      "saturation_fraction": 0.00010257297253701836
+    }
+  },
+  "contract": {
+    "activation": "static affine A8 per tensor",
+    "activation_quant_max": 255,
+    "activation_quant_min": 0,
+    "rotation": "none",
+    "weight": "LPBQ W4 G32",
+    "weight_layout": "OI oracle; export HWIO separately",
+    "zero_point": "fixed integer per candidate"
+  },
+  "environment": {
+    "cuda": true,
+    "device": "cuda",
+    "torch": "2.11.0+cu128"
+  },
+  "inputs": {
+    "dtype": "torch.float32",
+    "eval_shape": [
+      192,
+      6144
+    ],
+    "eval_split": "held_out",
+    "fit_shape": [
+      127,
+      6144
+    ],
+    "fit_split": "train",
+    "source_key": "layer_00.down_proj_input"
+  },
+  "w4a16": {
+    "eval_shape": [
+      192,
+      2048
+    ],
+    "fit_shape": [
+      127,
+      2048
+    ]
+  },
+  "weight": {
+    "group_size": 32,
+    "scale1_shape": [
+      2048,
+      192
+    ],
+    "scale2_shape": [
+      2048
+    ],
+    "shape": [
+      2048,
+      6144
+    ],
+    "source_key": "model.layers.0.mlp.down_proj.weight",
+    "weight_nmse": 0.011155607178807259
+  }
+}
