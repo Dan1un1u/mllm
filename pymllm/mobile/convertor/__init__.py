@@ -6,67 +6,31 @@ from __future__ import annotations
 import os
 import json
 import importlib
-from .model_file_v2 import ModelFileV2 as ModelFileV2
-from ..ffi import MLLM_FIND_TORCH_AVAILABLE
-from pathlib import Path
-from typing import Dict, Sequence
+from .model_file_v2 import ModelFileV2
+from ..ffi import MLLM_FIND_NUMPY_AVAILABLE, MLLM_FIND_TORCH_AVAILABLE
+from typing import Dict
 
+if MLLM_FIND_NUMPY_AVAILABLE:
+    import numpy as np
 if MLLM_FIND_TORCH_AVAILABLE:
     import torch
 MLLM_FIND_SAFETENSORS_AVAILABLE = importlib.util.find_spec("safetensors") is not None
 if MLLM_FIND_SAFETENSORS_AVAILABLE:
+    import safetensors
     from safetensors import safe_open
 
 
-def load_model(file_path: str, include_prefixes: Sequence[str] = ()) -> Dict:
+def load_model(file_path: str) -> Dict:
     """
     Load a model from file. Supports safetensors and torch formats.
     For safetensors, also supports model.index.json files.
 
     Args:
-        file_path: Path to the model file or a directory containing a safetensors model
-        include_prefixes: Optional parameter-name prefixes to load. Filtering an
-            indexed model before opening its shards avoids loading unrelated
-            vision or MTP tensors.
+        file_path: Path to the model file
 
     Returns:
         Dictionary containing the model parameters
     """
-    file_path = os.fspath(file_path)
-    if isinstance(include_prefixes, (str, bytes)):
-        raise TypeError("include_prefixes must be a sequence of non-empty strings")
-    include_prefixes = tuple(include_prefixes)
-    if any(not isinstance(prefix, str) or not prefix for prefix in include_prefixes):
-        raise ValueError("include_prefixes must contain only non-empty strings")
-
-    if os.path.isdir(file_path):
-        model_dir = Path(file_path)
-        index_files = sorted(model_dir.glob("*.safetensors.index.json"))
-        if index_files:
-            preferred_index = model_dir / "model.safetensors.index.json"
-            if preferred_index in index_files:
-                file_path = str(preferred_index)
-            elif len(index_files) == 1:
-                file_path = str(index_files[0])
-            else:
-                candidates = ", ".join(path.name for path in index_files)
-                raise ValueError(
-                    "Multiple safetensors indexes found without "
-                    f"model.safetensors.index.json: {candidates}"
-                )
-        else:
-            safetensors_files = sorted(model_dir.glob("*.safetensors"))
-            if len(safetensors_files) != 1:
-                raise ValueError(
-                    f"Expected one safetensors file or an index in directory: {model_dir}"
-                )
-            file_path = str(safetensors_files[0])
-
-    def should_load(name: str) -> bool:
-        return not include_prefixes or any(
-            name.startswith(prefix) for prefix in include_prefixes
-        )
-
     # Check if it's a safetensors file or index file
     if (
         file_path.endswith(".safetensors")
@@ -91,8 +55,6 @@ def load_model(file_path: str, include_prefixes: Sequence[str] = ()) -> Dict:
             # Group tensors by shard file
             shard_tensors = {}
             for tensor_name, shard_file in weight_map.items():
-                if not should_load(tensor_name):
-                    continue
                 if shard_file not in shard_tensors:
                     shard_tensors[shard_file] = []
                 shard_tensors[shard_file].append(tensor_name)
@@ -110,8 +72,7 @@ def load_model(file_path: str, include_prefixes: Sequence[str] = ()) -> Dict:
             state_dict = {}
             with safe_open(file_path, framework="pt", device="cpu") as f:
                 for k in f.keys():
-                    if should_load(k):
-                        state_dict[k] = f.get_tensor(k)
+                    state_dict[k] = f.get_tensor(k)
             return state_dict
 
     # Handle torch files
@@ -119,12 +80,7 @@ def load_model(file_path: str, include_prefixes: Sequence[str] = ()) -> Dict:
         if not MLLM_FIND_TORCH_AVAILABLE:
             raise ImportError("torch package is not available")
 
-        state_dict = torch.load(file_path, map_location="cpu", weights_only=True)
-        if include_prefixes:
-            state_dict = {
-                name: tensor for name, tensor in state_dict.items() if should_load(name)
-            }
-        return state_dict
+        return torch.load(file_path, map_location="cpu")
 
     else:
         raise ValueError(f"Unsupported file format for: {file_path}")

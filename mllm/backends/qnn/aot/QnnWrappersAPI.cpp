@@ -1,9 +1,18 @@
 // Copyright (c) MLLM Team.
 // Licensed under the MIT License.
-#include <memory>
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <functional>
+#include <limits>
+#include <map>
+#include <memory>
+#include <set>
 
 #include <QnnTypes.h>
+#include <nlohmann/json.hpp>
 
 #include <QnnContext.h>
 #include <HTP/QnnHtpDevice.h>
@@ -23,7 +32,228 @@
 
 namespace mllm::qnn::aot {
 
+namespace {
+
+bool envFlagEnabled(const char* name, bool fallback = false) {
+  const char* raw = std::getenv(name);
+  if (raw == nullptr || raw[0] == '\0') { return fallback; }
+  std::string value(raw);
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return std::tolower(c); });
+  return value == "1" || value == "true" || value == "yes" || value == "on";
+}
+
+std::string safeArtifactName(std::string name) {
+  for (auto& c : name) {
+    if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '_' && c != '-') { c = '_'; }
+  }
+  return name;
+}
+
+const char* qnnDataTypeName(Qnn_DataType_t type) {
+  switch (type) {
+    case QNN_DATATYPE_INT_4: return "INT4";
+    case QNN_DATATYPE_INT_8: return "INT8";
+    case QNN_DATATYPE_INT_16: return "INT16";
+    case QNN_DATATYPE_INT_32: return "INT32";
+    case QNN_DATATYPE_UINT_4: return "UINT4";
+    case QNN_DATATYPE_UINT_8: return "UINT8";
+    case QNN_DATATYPE_UINT_16: return "UINT16";
+    case QNN_DATATYPE_UINT_32: return "UINT32";
+    case QNN_DATATYPE_FLOAT_16: return "FLOAT16";
+    case QNN_DATATYPE_FLOAT_32: return "FLOAT32";
+    case QNN_DATATYPE_SFIXED_POINT_4: return "SFIXED_POINT_4";
+    case QNN_DATATYPE_SFIXED_POINT_8: return "SFIXED_POINT_8";
+    case QNN_DATATYPE_SFIXED_POINT_16: return "SFIXED_POINT_16";
+    case QNN_DATATYPE_UFIXED_POINT_4: return "UFIXED_POINT_4";
+    case QNN_DATATYPE_UFIXED_POINT_8: return "UFIXED_POINT_8";
+    case QNN_DATATYPE_UFIXED_POINT_16: return "UFIXED_POINT_16";
+    case QNN_DATATYPE_BOOL_8: return "BOOL8";
+    default: return "UNDEFINED_OR_OTHER";
+  }
+}
+
+const char* qnnTensorTypeName(Qnn_TensorType_t type) {
+  switch (type) {
+    case QNN_TENSOR_TYPE_APP_WRITE: return "APP_WRITE";
+    case QNN_TENSOR_TYPE_APP_READ: return "APP_READ";
+    case QNN_TENSOR_TYPE_APP_READWRITE: return "APP_READWRITE";
+    case QNN_TENSOR_TYPE_NATIVE: return "NATIVE";
+    case QNN_TENSOR_TYPE_STATIC: return "STATIC";
+    case QNN_TENSOR_TYPE_NULL: return "NULL";
+    default: return "UNDEFINED_OR_OTHER";
+  }
+}
+
+const char* quantRecipeTypeName(ir::linalg::QuantizationSpecType type) {
+  using T = ir::linalg::QuantizationSpecType;
+  switch (type) {
+    case T::kNone: return "none";
+    case T::kRaw: return "raw";
+    case T::kSymPerTensor: return "symmetric_per_tensor";
+    case T::kSymPerChannel: return "symmetric_per_channel";
+    case T::kSymPerBlock: return "symmetric_per_block";
+    case T::kAsymPerTensor: return "asymmetric_per_tensor";
+    case T::kAsymPerChannel: return "asymmetric_per_channel";
+    case T::kAsymPerBlock: return "asymmetric_per_block";
+    case T::kLPBQ: return "lpbq";
+  }
+  return "unknown";
+}
+
+nlohmann::json quantRecipeJson(const ir::tensor::TensorValue::ptr_t& value) {
+  nlohmann::json result = nlohmann::json::object();
+  auto attr = value->getAttr("quant_recipe");
+  if (!attr) {
+    result["type"] = "missing";
+    return result;
+  }
+  auto spec = attr->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_;
+  result["type"] = quantRecipeTypeName(spec->type);
+  result["solved"] = spec->solved;
+  using T = ir::linalg::QuantizationSpecType;
+  switch (spec->type) {
+    case T::kRaw: {
+      auto cfg = std::static_pointer_cast<ir::linalg::QuantizationSpecRaw>(spec);
+      result["storage_dtype"] = nameOfType(cfg->type_);
+      break;
+    }
+    case T::kSymPerTensor: {
+      auto cfg = std::static_pointer_cast<ir::linalg::QuantizationSpecSymPerTensor>(spec);
+      result.update({{"quant_min", cfg->quant_min}, {"quant_max", cfg->quant_max},
+                     {"quant_to_dtype", nameOfType(cfg->quant_to_type)}});
+      break;
+    }
+    case T::kSymPerChannel: {
+      auto cfg = std::static_pointer_cast<ir::linalg::QuantizationSpecSymPerChannel>(spec);
+      result.update({{"quant_min", cfg->quant_min}, {"quant_max", cfg->quant_max}, {"axis", cfg->ch_axis},
+                     {"quant_to_dtype", nameOfType(cfg->quant_to_type)}});
+      break;
+    }
+    case T::kSymPerBlock: {
+      auto cfg = std::static_pointer_cast<ir::linalg::QuantizationSpecSymPerBlock>(spec);
+      result.update({{"quant_min", cfg->quant_min}, {"quant_max", cfg->quant_max}, {"block_size", cfg->block_size},
+                     {"quant_to_dtype", nameOfType(cfg->quant_to_type)}});
+      break;
+    }
+    case T::kAsymPerTensor: {
+      auto cfg = std::static_pointer_cast<ir::linalg::QuantizationSpecAsymPerTensor>(spec);
+      result.update({{"quant_min", cfg->quant_min}, {"quant_max", cfg->quant_max},
+                     {"quant_to_dtype", nameOfType(cfg->quant_to_type)}});
+      break;
+    }
+    case T::kAsymPerChannel: {
+      auto cfg = std::static_pointer_cast<ir::linalg::QuantizationSpecAsymPerChannel>(spec);
+      result.update({{"quant_min", cfg->quant_min}, {"quant_max", cfg->quant_max}, {"axis", cfg->ch_axis},
+                     {"quant_to_dtype", nameOfType(cfg->quant_to_type)}});
+      break;
+    }
+    case T::kAsymPerBlock: {
+      auto cfg = std::static_pointer_cast<ir::linalg::QuantizationSpecAsymPerBlock>(spec);
+      result.update({{"quant_min", cfg->quant_min}, {"quant_max", cfg->quant_max}, {"block_size", cfg->block_size},
+                     {"quant_to_dtype", nameOfType(cfg->quant_to_type)}});
+      break;
+    }
+    case T::kLPBQ: {
+      auto cfg = std::static_pointer_cast<ir::linalg::QuantizationSpecLPBQ>(spec);
+      result.update({{"quant_min", cfg->quant_min}, {"quant_max", cfg->quant_max}, {"block_size", cfg->block_size},
+                     {"channel_axis", cfg->ch_axis}, {"block_scale_bitwidth", cfg->scale_level_0_bitwidth},
+                     {"quant_to_dtype", nameOfType(cfg->quant_to_type)},
+                     {"channel_scale_dtype", nameOfType(cfg->scale_1_type)}});
+      break;
+    }
+    case T::kNone: break;
+  }
+  return result;
+}
+
+nlohmann::json scaleOffsetStats(const Qnn_ScaleOffset_t* values, uint32_t count) {
+  nlohmann::json result{{"count", count}};
+  if (values == nullptr || count == 0) { return result; }
+  float minScale = std::numeric_limits<float>::max();
+  float maxScale = std::numeric_limits<float>::lowest();
+  double scaleSum = 0.0;
+  int32_t minZeroPoint = std::numeric_limits<int32_t>::max();
+  int32_t maxZeroPoint = std::numeric_limits<int32_t>::lowest();
+  for (uint32_t i = 0; i < count; ++i) {
+    minScale = std::min(minScale, values[i].scale);
+    maxScale = std::max(maxScale, values[i].scale);
+    scaleSum += values[i].scale;
+    const int32_t zeroPoint = -values[i].offset;
+    minZeroPoint = std::min(minZeroPoint, zeroPoint);
+    maxZeroPoint = std::max(maxZeroPoint, zeroPoint);
+  }
+  result.update({{"scale_min", minScale}, {"scale_max", maxScale}, {"scale_mean", scaleSum / count},
+                 {"zero_point_min", minZeroPoint}, {"zero_point_max", maxZeroPoint}});
+  if (count <= 16) {
+    result["values"] = nlohmann::json::array();
+    for (uint32_t i = 0; i < count; ++i) {
+      result["values"].push_back({{"scale", values[i].scale}, {"zero_point", -values[i].offset}});
+    }
+  }
+  return result;
+}
+
+nlohmann::json nativeQuantizationJson(const Qnn_Tensor_t* tensor) {
+  const auto& quant = QNN_TENSOR_GET_QUANT_PARAMS(tensor);
+  nlohmann::json result{{"defined", quant.encodingDefinition == QNN_DEFINITION_DEFINED},
+                        {"encoding_id", static_cast<int64_t>(quant.quantizationEncoding)}};
+  if (quant.encodingDefinition != QNN_DEFINITION_DEFINED) {
+    result["encoding"] = "undefined";
+    return result;
+  }
+  switch (quant.quantizationEncoding) {
+    case QNN_QUANTIZATION_ENCODING_SCALE_OFFSET:
+      result["encoding"] = "scale_offset";
+      result["scale"] = quant.scaleOffsetEncoding.scale;
+      result["zero_point"] = -quant.scaleOffsetEncoding.offset;
+      break;
+    case QNN_QUANTIZATION_ENCODING_AXIS_SCALE_OFFSET:
+      result["encoding"] = "axis_scale_offset";
+      result["axis"] = quant.axisScaleOffsetEncoding.axis;
+      result["scale_offset_stats"] = scaleOffsetStats(quant.axisScaleOffsetEncoding.scaleOffset,
+                                                       quant.axisScaleOffsetEncoding.numScaleOffsets);
+      break;
+    case QNN_QUANTIZATION_ENCODING_BLOCKWISE_EXPANSION: {
+      result["encoding"] = "blockwise_expansion";
+      auto* block = quant.blockwiseExpansion;
+      if (block == nullptr) { break; }
+      const auto* dims = QNN_TENSOR_GET_DIMENSIONS(tensor);
+      const uint32_t axisSize = dims == nullptr ? 0 : dims[block->axis];
+      const uint64_t blockScaleCount = static_cast<uint64_t>(axisSize) * block->numBlocksPerAxis;
+      result.update({{"axis", block->axis}, {"axis_size", axisSize},
+                     {"num_blocks_per_axis", block->numBlocksPerAxis},
+                     {"block_scale_bitwidth", block->blockScaleBitwidth},
+                     {"block_scale_storage_bits",
+                      block->blockScaleStorageType == QNN_BLOCKWISE_EXPANSION_BITWIDTH_SCALE_STORAGE_8 ? 8 : 16},
+                     {"block_scale_count", blockScaleCount},
+                     {"channel_scale_stats", scaleOffsetStats(block->scaleOffsets, axisSize)}});
+      if (blockScaleCount != 0) {
+        uint32_t minValue = std::numeric_limits<uint32_t>::max();
+        uint32_t maxValue = 0;
+        double sum = 0.0;
+        for (uint64_t i = 0; i < blockScaleCount; ++i) {
+          const uint32_t value = block->blockScaleStorageType == QNN_BLOCKWISE_EXPANSION_BITWIDTH_SCALE_STORAGE_8
+                                     ? block->blocksScale8[i]
+                                     : block->blocksScale16[i];
+          minValue = std::min(minValue, value);
+          maxValue = std::max(maxValue, value);
+          sum += value;
+        }
+        result["block_scale_stats"] = {{"min", minValue}, {"max", maxValue},
+                                         {"mean", sum / blockScaleCount}};
+      }
+      break;
+    }
+    default: result["encoding"] = "supported_by_qnn_but_not_expanded_by_manifest"; break;
+  }
+  return result;
+}
+
+}  // namespace
+
 QnnAOTNodeTensor::QnnAOTNodeTensor(const ir::tensor::TensorValue::ptr_t& v, bool force_static_weight) {
+  ir_storage_dtype_ = nameOfType(v->tensor_.dtype());
+  quant_recipe_json_ = quantRecipeJson(v).dump();
   auto type = parseQnnTensorTypeFromIR(v);
   auto name = v->name();
   auto quant = parseQnnQuantizeParamFromIR(v);
@@ -271,7 +501,9 @@ QnnAOTNodeOperation::ptr_t QnnAOTNodeOperation::setPackageName(const std::string
 }
 
 QnnAOTGraph::QnnAOTGraph(QNN_INTERFACE_VER_TYPE& qnnInterface, Qnn_BackendHandle_t backendHandle,
-                         Qnn_ContextHandle_t contextHandle, const std::string& graphName) {
+                         Qnn_ContextHandle_t contextHandle, Qnn_ProfileHandle_t profileHandle,
+                         const std::string& graphName)
+    : qnn_interface_(&qnnInterface), profile_handle_(profileHandle), graph_name_(graphName) {
   qnn_model_ = std::make_shared<mllm::qnn::QNNModel>(qnnInterface, backendHandle);
 
   // Short Depth Conv On HMX Off
@@ -343,9 +575,174 @@ void QnnAOTGraph::addOperation(const QnnAOTNodeOperation::ptr_t& qnn_op) {
 
 bool QnnAOTGraph::compile() {
   if (is_compiled_) { return true; }
-  bool ret = qnn_model_->finalizeGraph(nullptr, nullptr) == mllm::qnn::MODEL_NO_ERROR;
+  dumpQuantizationManifest();
+  bool ret = qnn_model_->finalizeGraph(profile_handle_, nullptr) == mllm::qnn::MODEL_NO_ERROR;
+  if (ret && profile_handle_ != nullptr) { dumpOptraceArtifacts(); }
   is_compiled_ = true;
   return ret;
+}
+
+void QnnAOTGraph::dumpQuantizationManifest() {
+  const char* manifestDirEnv = std::getenv("MLLM_QNN_AOT_QUANT_MANIFEST_DIR");
+  const char* optraceDirEnv = std::getenv("MLLM_QNN_AOT_OPTRACE_DIR");
+  const char* selectedDir = manifestDirEnv && manifestDirEnv[0] ? manifestDirEnv : optraceDirEnv;
+  if (selectedDir == nullptr || selectedDir[0] == '\0') { return; }
+
+  const std::filesystem::path outputDir = selectedDir;
+  std::error_code fsError;
+  std::filesystem::create_directories(outputDir, fsError);
+  if (fsError) {
+    MLLM_ERROR("Failed to create quantization manifest directory {}: {}", outputDir.string(), fsError.message());
+    return;
+  }
+
+  std::map<std::string, QnnAOTNodeTensor::ptr_t> tensors;
+  std::map<std::string, std::string> producers;
+  std::map<std::string, std::set<std::string>> consumers;
+  std::vector<QnnAOTNodeOperation::ptr_t> operations;
+  operations.reserve(op_node_.size());
+  for (const auto& item : op_node_) {
+    const auto& op = item.second;
+    operations.push_back(op);
+    for (const auto& tensor : op->inputs) {
+      const auto& name = tensor->getWrapper()->getName();
+      tensors[name] = tensor;
+      consumers[name].insert(op->name_);
+    }
+    for (const auto& tensor : op->outputs) {
+      const auto& name = tensor->getWrapper()->getName();
+      tensors[name] = tensor;
+      producers[name] = op->name_;
+    }
+  }
+  for (const auto& [name, tensor] : all_tensors_) { tensors[name] = tensor; }
+  std::sort(operations.begin(), operations.end(), [](const auto& lhs, const auto& rhs) { return lhs->name_ < rhs->name_; });
+
+  nlohmann::json manifest{{"schema_version", 2},
+                          {"graph", graph_name_},
+                          {"scope", "pre-finalize QNN graph; HTP lowering may change physical execution dtypes"},
+                          {"operations", nlohmann::json::array()},
+                          {"tensors", nlohmann::json::array()}};
+  for (const auto& op : operations) {
+    nlohmann::json item{{"name", op->name_}, {"qnn_op_type", op->op_name_}, {"package", op->package_name_},
+                        {"inputs", nlohmann::json::array()}, {"outputs", nlohmann::json::array()}};
+    for (const auto& tensor : op->inputs) item["inputs"].push_back(tensor->getWrapper()->getName());
+    for (const auto& tensor : op->outputs) item["outputs"].push_back(tensor->getWrapper()->getName());
+    manifest["operations"].push_back(std::move(item));
+  }
+  for (const auto& [name, tensor] : tensors) {
+    const auto* native = tensor->getWrapper()->getNativeTensor();
+    nlohmann::json dimensions = nlohmann::json::array();
+    const auto* nativeDimensions = QNN_TENSOR_GET_DIMENSIONS(native);
+    for (uint32_t i = 0; i < QNN_TENSOR_GET_RANK(native); ++i) dimensions.push_back(nativeDimensions[i]);
+    const auto recipe = nlohmann::json::parse(tensor->getQuantRecipeJson());
+    const auto logicalQuantDtype = recipe.value("quant_to_dtype", recipe.value("storage_dtype", tensor->getIRStorageDtype()));
+    nlohmann::json item{{"name", name},
+                        {"ir_storage_dtype", tensor->getIRStorageDtype()},
+                        {"logical_quant_dtype", logicalQuantDtype},
+                        {"qnn_dtype", qnnDataTypeName(QNN_TENSOR_GET_DATA_TYPE(native))},
+                        {"qnn_dtype_id", static_cast<int64_t>(QNN_TENSOR_GET_DATA_TYPE(native))},
+                        {"tensor_type", qnnTensorTypeName(QNN_TENSOR_GET_TYPE(native))},
+                        {"dimensions", std::move(dimensions)},
+                        {"quant_recipe", recipe},
+                        {"qnn_quantization", nativeQuantizationJson(native)},
+                        {"producer", producers.count(name) ? nlohmann::json(producers[name]) : nlohmann::json(nullptr)},
+                        {"consumers", nlohmann::json::array()}};
+    for (const auto& consumer : consumers[name]) item["consumers"].push_back(consumer);
+    manifest["tensors"].push_back(std::move(item));
+  }
+
+  const auto outputPath = outputDir / (safeArtifactName(graph_name_) + "_quant_manifest.json");
+  std::ofstream output(outputPath, std::ios::trunc);
+  output << manifest.dump(2) << '\n';
+  if (output.good()) {
+    MLLM_INFO("Wrote QNN quantization manifest {} ({} ops, {} tensors)", outputPath.string(), operations.size(),
+              tensors.size());
+  } else {
+    MLLM_ERROR("Failed to write QNN quantization manifest {}", outputPath.string());
+  }
+}
+
+void QnnAOTGraph::dumpOptraceArtifacts() {
+  if (qnn_interface_ == nullptr || qnn_interface_->profileGetEvents == nullptr ||
+      qnn_interface_->profileGetSubEvents == nullptr || qnn_interface_->profileGetExtendedEventData == nullptr) {
+    MLLM_WARN("Optrace artifact extraction APIs are unavailable for graph {}", graph_name_);
+    return;
+  }
+
+  const char* outputDirEnv = std::getenv("MLLM_QNN_AOT_OPTRACE_DIR");
+  const std::filesystem::path outputDir = outputDirEnv && outputDirEnv[0] ? outputDirEnv : ".";
+  std::error_code fsError;
+  std::filesystem::create_directories(outputDir, fsError);
+  if (fsError) {
+    MLLM_ERROR("Failed to create Optrace artifact directory {}: {}", outputDir.string(), fsError.message());
+    return;
+  }
+
+  uint32_t artifactIndex = 0;
+  // The HTP backend writes the schematic directly to the current working
+  // directory during graph finalization; it is not normally returned as a
+  // QNN profile event. Move it to the caller-selected artifact directory.
+  const auto emittedSchematic = std::filesystem::current_path() / (graph_name_ + "_schematic.bin");
+  if (std::filesystem::exists(emittedSchematic)) {
+    const auto outputPath = outputDir / emittedSchematic.filename();
+    if (emittedSchematic != outputPath) {
+      std::filesystem::rename(emittedSchematic, outputPath, fsError);
+      if (fsError) {
+        fsError.clear();
+        std::filesystem::copy_file(emittedSchematic, outputPath,
+                                   std::filesystem::copy_options::overwrite_existing, fsError);
+        if (!fsError) { std::filesystem::remove(emittedSchematic, fsError); }
+      }
+    }
+    if (!fsError) {
+      MLLM_INFO("Collected QNN Optrace schematic {}", outputPath.string());
+      ++artifactIndex;
+    } else {
+      MLLM_ERROR("Failed to collect QNN Optrace schematic {}: {}", emittedSchematic.string(), fsError.message());
+      fsError.clear();
+    }
+  }
+
+  std::function<void(QnnProfile_EventId_t)> visitEvent;
+  visitEvent = [&](QnnProfile_EventId_t eventId) {
+    QnnProfile_ExtendedEventData_t extended = QNN_PROFILE_EXTENDED_EVENT_DATA_INIT;
+    if (QNN_PROFILE_NO_ERROR == qnn_interface_->profileGetExtendedEventData(eventId, &extended) &&
+        extended.version == QNN_PROFILE_DATA_VERSION_1 && extended.v1.unit == QNN_PROFILE_EVENTUNIT_OBJECT) {
+      const auto& objectInfo = extended.v1.backendOpaqueObject;
+      const auto& object = objectInfo.opaqueObject;
+      if (object.data != nullptr && object.len != 0) {
+        std::string fileName = objectInfo.fileName ? std::filesystem::path(objectInfo.fileName).filename().string() : "";
+        if (fileName.empty()) {
+          fileName = safeArtifactName(graph_name_) + "_optrace_" + std::to_string(artifactIndex) + ".bin";
+        }
+        ++artifactIndex;
+        const auto outputPath = outputDir / fileName;
+        std::ofstream output(outputPath, std::ios::binary | std::ios::trunc);
+        output.write(static_cast<const char*>(object.data), object.len);
+        if (output.good()) {
+          MLLM_INFO("Wrote QNN Optrace artifact {} ({} bytes)", outputPath.string(), object.len);
+        } else {
+          MLLM_ERROR("Failed to write QNN Optrace artifact {}", outputPath.string());
+        }
+      }
+    }
+
+    const QnnProfile_EventId_t* children = nullptr;
+    uint32_t numChildren = 0;
+    if (QNN_PROFILE_NO_ERROR == qnn_interface_->profileGetSubEvents(eventId, &children, &numChildren)) {
+      for (uint32_t i = 0; i < numChildren; ++i) { visitEvent(children[i]); }
+    }
+  };
+
+  const QnnProfile_EventId_t* events = nullptr;
+  uint32_t numEvents = 0;
+  if (QNN_PROFILE_NO_ERROR != qnn_interface_->profileGetEvents(profile_handle_, &events, &numEvents)) {
+    MLLM_ERROR("Failed to retrieve Optrace finalize events for graph {}", graph_name_);
+    return;
+  }
+  for (uint32_t i = 0; i < numEvents; ++i) { visitEvent(events[i]); }
+  if (artifactIndex == 0) { MLLM_WARN("No Optrace schematic artifact was emitted for graph {}", graph_name_); }
 }
 
 const std::vector<std::string> QnnDynSymbolLoader::possible_qnn_dyn_lib_paths_{
@@ -520,6 +917,21 @@ std::shared_ptr<QnnDeviceAndContext> QnnAOTEnv::createContext(const std::string&
     auto status = qnn_htp_func_symbols_.qnn_interface_.profileCreate(context->bk_handle_, QNN_PROFILE_LEVEL_DETAILED,
                                                                      &context->profile_bk_handle_);
     MLLM_RT_ASSERT_EQ(status, QNN_SUCCESS);
+    context->optrace_enabled_ = envFlagEnabled("MLLM_QNN_AOT_OPTRACE");
+    if (context->optrace_enabled_) {
+      MLLM_RT_ASSERT(qnn_htp_func_symbols_.qnn_interface_.profileSetConfig != nullptr);
+      MLLM_RT_ASSERT_EQ(qnn_htp_func_symbols_.qnn_interface_.propertyHasCapability(
+                            QNN_PROPERTY_PROFILE_SUPPORT_OPTRACE_CONFIG),
+                        QNN_PROPERTY_SUPPORTED);
+      QnnProfile_Config_t optraceConfig = QNN_PROFILE_CONFIG_INIT;
+      optraceConfig.option = QNN_PROFILE_CONFIG_OPTION_ENABLE_OPTRACE;
+      optraceConfig.enableOptrace = 1;
+      const QnnProfile_Config_t* configs[] = {&optraceConfig, nullptr};
+      auto configStatus =
+          qnn_htp_func_symbols_.qnn_interface_.profileSetConfig(context->profile_bk_handle_, configs);
+      MLLM_RT_ASSERT_EQ(configStatus, QNN_PROFILE_NO_ERROR);
+      MLLM_INFO("QNN AOT Optrace enabled for context {}", name);
+    }
   }
 
   // 4. Create Context
@@ -671,8 +1083,9 @@ QnnAOTGraph::ptr_t QnnAOTEnv::captureAOTGraph(const std::string& qnn_context_nam
   }
   auto& ctx = contexts_[qnn_context_name];
   if (ctx->graphs_.find(g_name) == ctx->graphs_.end()) {
-    ctx->graphs_[g_name] =
-        std::make_shared<QnnAOTGraph>(qnn_htp_func_symbols_.qnn_interface_, ctx->bk_handle_, ctx->qnn_ctx_handle_, g_name);
+    ctx->graphs_[g_name] = std::make_shared<QnnAOTGraph>(
+        qnn_htp_func_symbols_.qnn_interface_, ctx->bk_handle_, ctx->qnn_ctx_handle_,
+        ctx->optrace_enabled_ ? ctx->profile_bk_handle_ : nullptr, g_name);
   }
   return ctx->graphs_[g_name];
 }

@@ -65,6 +65,22 @@ void KVCacheManager<T>::initCache(mllm::Allocator* allocator, int32_t ar_len) {
 }
 
 template<typename T>
+void KVCacheManager<T>::resetCache() {
+  for (auto& cache : k_cache_) {
+    std::memset(cache.buffer, 0, cache.buffer_storage->size_);
+    std::memset(cache.output_buffer, 0, cache.output_buffer_storage->size_);
+  }
+  for (auto& cache : v_cache_) {
+    std::memset(cache.buffer, 0, cache.buffer_storage->size_);
+    std::memset(cache.output_buffer, 0, cache.output_buffer_storage->size_);
+  }
+  // Zero-filled cache has no layout-dependent content. Treat it as the
+  // prompt graph layout so the next independent request can start at pos 0
+  // without changing any QNN-bound buffer address.
+  cur_ar_len_ = config_.ar_len;
+}
+
+template<typename T>
 void KVCacheManager<T>::initAttentionMask(uint16_t* attention_mask, const std::vector<int32_t>& attention_map, int32_t ar_len,
                                           int32_t n_past) {
   if (attention_map.size() > ar_len) {

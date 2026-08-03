@@ -1,8 +1,11 @@
 #include "mllm/backends/qnn/aot_rt/TokenGenerator.hpp"
 #include "mllm/preprocessor/tokenizers/Unicode.hpp"
 #include <cstring>
+#include <cstdlib>
 #include <numeric>
 #include <utility>
+#include <chrono>
+#include <fstream>
 
 namespace mllm::qnn::aot {
 
@@ -123,8 +126,14 @@ int64_t TokenGenerator<T>::generate(std::vector<int64_t>& tokens, int64_t start_
 
     // Run forward
     auto module_input = input_tensors_;
+    auto startTime = std::chrono::steady_clock::now();
     output_tensors_ = (*module_)(module_input);
-
+    auto endTime = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();
+    const char* profileDir = std::getenv("MLLM_QNN_PROFILE_DIR");
+    const std::string profilePath = std::string(profileDir ? profileDir : "/data/local/tmp") + "/qnn_e2e_profile.csv";
+    std::ofstream detailFile(profilePath, std::ios::app);
+    if (detailFile.is_open()) { detailFile << "decode,model.0.s1,1," << duration << '\n'; }
     // Update KV Cache
     int32_t n_update = 1;
     kv_manager_->updateCache(1, current_pos, n_update, {});

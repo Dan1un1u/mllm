@@ -24,11 +24,6 @@ void CPUContiguousOp::forward(const std::vector<Tensor>& inputs, std::vector<Ten
 
   const int32_t ndim = i.shape().size();
 
-  if (ndim == 0 || i.isContiguous()) {
-    std::memcpy(dst_ptr, src_ptr, total_bytes);
-    return;
-  }
-
   if (ndim == 1) {
     const int32_t stride_bytes = i.stride()[0] * ele_size;
     const int32_t size = i.shape()[0];
@@ -79,18 +74,33 @@ void CPUContiguousOp::forward(const std::vector<Tensor>& inputs, std::vector<Ten
     return;
   }
 
-  if (i.stride()[ndim - 1] == 1) {
-    const size_t inner_size = i.shape()[ndim - 1];
-    const size_t inner_bytes = inner_size * ele_size;
-    const size_t outer_count = total_elements / inner_size;
+  bool last_dim_contiguous = true;
+  for (int d = ndim - 2; d >= 0; --d) {
+    if (i.stride()[d] != i.stride()[d + 1] * i.stride()[d + 1]) {
+      last_dim_contiguous = false;
+      break;
+    }
+  }
 
-    for (size_t idx = 0; idx < outer_count; ++idx) {
+  if (last_dim_contiguous) {
+    const int32_t inner_size = i.shape()[ndim - 1];
+    const int32_t inner_bytes = inner_size * ele_size;
+    const int32_t outer_count = total_elements / inner_size;
+
+    std::vector<int32_t> outer_strides(ndim - 1);
+    int64_t cumulative_stride = 1;
+    for (int d = ndim - 2; d >= 0; --d) {
+      cumulative_stride *= i.shape()[d + 1];
+      outer_strides[d] = i.stride()[d] * cumulative_stride;
+    }
+
+    for (int32_t idx = 0; idx < outer_count; ++idx) {
       int64_t offset = 0;
-      size_t temp = idx;
-      for (int d = ndim - 2; d >= 0; --d) {
+      int32_t temp = idx;
+      for (int d = 0; d < ndim - 1; ++d) {
         const int32_t dim_index = temp % i.shape()[d];
         temp /= i.shape()[d];
-        offset += dim_index * i.stride()[d];
+        offset += dim_index * outer_strides[d];
       }
       std::memcpy(dst_ptr, src_ptr + offset * ele_size, inner_bytes);
       dst_ptr += inner_bytes;

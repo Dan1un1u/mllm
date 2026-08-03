@@ -8,7 +8,10 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <numeric>
+#include <chrono>
+#include <fstream>
 
 namespace mllm::qnn::aot {
 
@@ -134,7 +137,19 @@ int64_t PromptProcessor<T>::prefill(const std::vector<int64_t>& prompt_tokens, i
     prepare_io(prompt_tokens, processed_tokens, current_pos);
 
     std::vector<Tensor> module_input = input_tensors_;
+    auto startTime = std::chrono::steady_clock::now();
+
     output_tensors_ = (*module_)(module_input);
+
+    auto endTime = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();
+
+    const char* profileDir = std::getenv("MLLM_QNN_PROFILE_DIR");
+    const std::string profilePath = std::string(profileDir ? profileDir : "/data/local/tmp") + "/qnn_e2e_profile.csv";
+    std::ofstream detailFile(profilePath, std::ios::app);
+    if (detailFile.is_open()) {
+      detailFile << "prompt,model.0.s" << config_.ar_len << ',' << chunk_size << ',' << duration << '\n';
+    }
 
     int32_t n_update = chunk_size;
 

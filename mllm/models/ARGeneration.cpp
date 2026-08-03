@@ -69,7 +69,6 @@ void ARGenerationChatIterator::step() {
   }
 
   if (step_count_ >= max_length_) {
-    gen_->generationEventEndTimePoint();
     finished_ = true;
     return;
   }
@@ -79,7 +78,7 @@ void ARGenerationChatIterator::step() {
   // Timing
   if (step_count_ == 0) {
     gen_->prefillEventStartTimePoint();
-  } else {
+  } else if (step_count_ == 1) {
     gen_->decodeEventStartTimePoint();
   }
 
@@ -110,19 +109,10 @@ void ARGenerationChatIterator::step() {
   current_step_.current_step = step_count_;
   current_step_.cur_token_id = next_token_id;
 
-  if (step_count_ == 0) {
-    gen_->firstTokenEventTimePoint();
-  } else {
+  if (next_token_id == eos_token_id_) {
+    // Timing
     gen_->decodeEventEndTimePoint();
-  }
-
-  step_count_++;
-  gen_->ar_steps_++;
-
-  if (gen_->isEosToken(next_token_id, eos_token_id_)) {
-    gen_->generationEventEndTimePoint();
     finished_ = true;
-    return;
   }
 
   // [B, S]
@@ -131,6 +121,9 @@ void ARGenerationChatIterator::step() {
   current_input_["sequence"] = Tensor::empty({1, 1}, kInt64, kCPU).alloc();
   current_input_["sequence"].at<mllm_int64_t>({0, 0}) = next_token_id;
   current_input_["sequence"] = current_input_["sequence"].to(device);
+
+  step_count_++;
+  gen_->ar_steps_++;
 }
 __MLLM_UNSAFE_OPT_END
 
@@ -152,9 +145,9 @@ ARGenerationOutputPast ARGeneration::generate(const ARGenerationOutputPast& inpu
   for (int i = 0; i < max_length; ++i) {
     // Timing
     if (i == 0) {
-      prefillEventStartTimePoint();
       if (past.count("sequence") > 0) { ar_prefill_tokens_ = past["sequence"].shape()[1]; }
-    } else {
+      prefillEventStartTimePoint();
+    } else if (i == 1) {
       decodeEventStartTimePoint();
     }
 
@@ -179,23 +172,19 @@ ARGenerationOutputPast ARGeneration::generate(const ARGenerationOutputPast& inpu
     }
 
     generated_tokens.push_back(next_token_id);
-    ar_steps_++;
 
-    if (i == 0) {
-      firstTokenEventTimePoint();
-    } else {
-      decodeEventEndTimePoint();
-    }
-
-    if (isEosToken(next_token_id, eos_token_id)) { break; }
+    if (next_token_id == eos_token_id) { break; }
 
     // [B, S]
     past = output;
     past["sequence"] = Tensor::empty({1, 1}, kInt64, logits.device()).alloc();
     past["sequence"].at<mllm_int64_t>({0, 0}) = next_token_id;
+
+    ar_steps_++;
   }
 
-  generationEventEndTimePoint();
+  // Timing
+  decodeEventEndTimePoint();
 
   // From blob
   Tensor generated_tensor = Tensor::empty({(int32_t)generated_tokens.size()}, kInt64, kCPU).alloc();
@@ -228,7 +217,7 @@ void ARGeneration::streamGenerate(const ARGenerationOutputPast& input, const ARG
     // Timing
     if (i == 0) {
       prefillEventStartTimePoint();
-    } else {
+    } else if (i == 1) {
       decodeEventStartTimePoint();
     }
 
@@ -257,97 +246,71 @@ void ARGeneration::streamGenerate(const ARGenerationOutputPast& input, const ARG
       next_token_id = sampleGreedy(logits);
     }
 
-    ar_steps_++;
-    if (i == 0) {
-      firstTokenEventTimePoint();
-    } else {
-      decodeEventEndTimePoint();
-    }
-
     callback(next_token_id);
 
-    if (isEosToken(next_token_id, eos_token_id)) { break; }
+    if (next_token_id == eos_token_id) { break; }
 
     // [B, S]
     past = output;
     past["sequence"] = Tensor::empty({1, 1}, kInt64, kCPU).alloc();
     past["sequence"].at<mllm_int64_t>({0, 0}) = next_token_id;
     past["sequence"] = past["sequence"].to(device);
+
+    ar_steps_++;
   }
 
-  generationEventEndTimePoint();
+  // Timing
+  decodeEventEndTimePoint();
 }
 
 IROutput ARGeneration::trace(const ARGenerationOutputPast& input, const ARGenerationArgs& args) { return {}; }
 
-ARGenerationPerformanceStats ARGeneration::perfStats() const {
-  ARGenerationPerformanceStats stats;
-  stats.completed = generation_completed_;
-  stats.prefill_tokens = ar_prefill_tokens_;
-  stats.generated_tokens = ar_steps_;
-  stats.decode_steps = ar_steps_ > 0 ? ar_steps_ - 1 : 0;
-
-  if (!prefill_started_ || !prefill_finished_ || !first_token_recorded_) { return stats; }
-
-  stats.prefill_duration_us =
-      std::chrono::duration_cast<std::chrono::microseconds>(llm_prefill_end_time_ - llm_prefill_start_time_).count();
-  stats.decode_duration_us = llm_decode_duration_.count();
-  stats.ttft_duration_us =
-      std::chrono::duration_cast<std::chrono::microseconds>(llm_first_token_time_ - llm_prefill_start_time_).count();
-  stats.total_duration_us = stats.ttft_duration_us + stats.decode_duration_us;
-  stats.valid = stats.prefill_duration_us >= 0 && stats.decode_duration_us >= 0 && stats.ttft_duration_us >= 0;
-  return stats;
-}
-
 void ARGeneration::perfSummary() {
-  const auto stats = perfStats();
+  auto prefill_duration =
+      std::chrono::duration_cast<std::chrono::microseconds>(llm_prefill_end_time_ - llm_prefill_start_time_).count();
 
-  fmt::print(fg(fmt::color::cyan), "\n{:=^50}\n", " Performance Summary ");
-  if (!stats.valid) {
-    fmt::print(fg(fmt::color::yellow), "No valid generation timing is available.\n");
-    fmt::print(fg(fmt::color::cyan), "{:=^50}\n", "");
-    return;
-  }
+  auto decode_duration =
+      std::chrono::duration_cast<std::chrono::microseconds>(llm_decode_end_time_ - llm_decode_start_time_).count();
+
+  auto total_duration = prefill_duration + decode_duration;
 
   double avg_decode_duration = 0;
-  if (stats.decode_steps > 0) {
-    avg_decode_duration = static_cast<double>(stats.decode_duration_us) / static_cast<double>(stats.decode_steps);
-  }
+  if (ar_steps_ > 1) { avg_decode_duration = static_cast<double>(decode_duration) / (ar_steps_ - 1); }
 
   double prefill_tokens_per_sec = 0;
   double decode_tokens_per_sec = 0;
 
-  if (stats.prefill_duration_us > 0) {
-    prefill_tokens_per_sec = static_cast<double>(stats.prefill_tokens) / (stats.prefill_duration_us / 1000000.0);
-  }
+  if (prefill_duration > 0) { prefill_tokens_per_sec = (double)ar_prefill_tokens_ / (prefill_duration / 1000000.0); }
 
-  if (stats.decode_duration_us > 0 && stats.decode_steps > 0) {
-    decode_tokens_per_sec = static_cast<double>(stats.decode_steps) / (stats.decode_duration_us / 1000000.0);
-  }
+  if (decode_duration > 0 && ar_steps_ > 1) { decode_tokens_per_sec = (double)(ar_steps_ - 1) / (decode_duration / 1000000.0); }
 
+  auto ttft_duration =
+      std::chrono::duration_cast<std::chrono::microseconds>(llm_decode_start_time_ - llm_prefill_start_time_).count();
+
+  fmt::print(fg(fmt::color::cyan), "\n{:=^50}\n", " Performance Summary ");
   fmt::print(fg(fmt::color::white), "{:<20}: ", "Total time");
-  fmt::print(fg(fmt::color::yellow), "{:>10.2f} μs\n", static_cast<double>(stats.total_duration_us));
+  fmt::print(fg(fmt::color::yellow), "{:>10.2f} μs\n", (double)total_duration);
 
   fmt::print(fg(fmt::color::white), "{:<20}: ", "Prefill time");
-  fmt::print(fg(fmt::color::yellow), "{:>10.2f} μs", static_cast<double>(stats.prefill_duration_us));
+  fmt::print(fg(fmt::color::yellow), "{:>10.2f} μs", (double)prefill_duration);
   if (prefill_tokens_per_sec > 0) { fmt::print(fg(fmt::color::white), " ({:>6.2f} tokens/s)", prefill_tokens_per_sec); }
   fmt::print("\n");
 
   fmt::print(fg(fmt::color::white), "{:<20}: ", "Decode time");
-  fmt::print(fg(fmt::color::yellow), "{:>10.2f} μs", static_cast<double>(stats.decode_duration_us));
+  fmt::print(fg(fmt::color::yellow), "{:>10.2f} μs", (double)decode_duration);
   if (decode_tokens_per_sec > 0) { fmt::print(fg(fmt::color::white), " ({:>6.2f} tokens/s)", decode_tokens_per_sec); }
   fmt::print("\n");
 
   fmt::print(fg(fmt::color::white), "{:<20}: ", "TTFT");
-  fmt::print(fg(fmt::color::magenta), "{:>10.2f} μs\n", static_cast<double>(stats.ttft_duration_us));
+  fmt::print(fg(fmt::color::magenta), "{:>10.2f} μs\n", (double)ttft_duration);
 
   fmt::print(fg(fmt::color::white), "{:<20}: ", "Prefill tokens");
-  fmt::print(fg(fmt::color::green), "{:>10}\n", stats.prefill_tokens);
+  fmt::print(fg(fmt::color::green), "{:>10}\n", ar_prefill_tokens_);
 
   fmt::print(fg(fmt::color::white), "{:<20}: ", "Decode steps");
-  fmt::print(fg(fmt::color::green), "{:>10}\n", stats.decode_steps);
+  fmt::print(fg(fmt::color::green), "{:>10}\n", ar_steps_ > 0 ? ar_steps_ - 1 : 0);
 
-  if (stats.decode_steps > 0) {
+  if (ar_steps_ > 1) {
     fmt::print(fg(fmt::color::white), "{:<20}: ", "Avg decode time");
     fmt::print(fg(fmt::color::yellow), "{:>10.2f} μs/token\n", avg_decode_duration);
   }
@@ -358,7 +321,6 @@ void ARGeneration::perfSummary() {
     fmt::print(fg(fmt::color::magenta), "\n{:=^50}\n", " Custom Events ");
     for (const auto& pair : custom_event_time_) {
       const auto& name = pair.first;
-      if (!completed_custom_events_.count(name)) { continue; }
       const auto& time_points = pair.second;
       auto duration = std::chrono::duration_cast<std::chrono::microseconds>(time_points.second - time_points.first).count();
 
@@ -531,62 +493,20 @@ int ARGeneration::sampleFromDistribution(const std::vector<float>& probs) {
   return dist(gen);
 }
 
-void ARGeneration::prefillEventStartTimePoint() {
-  ar_steps_ = 0;
-  ar_prefill_tokens_ = 0;
-  llm_decode_duration_ = std::chrono::microseconds::zero();
-  prefill_started_ = true;
-  prefill_finished_ = false;
-  first_token_recorded_ = false;
-  decode_event_active_ = false;
-  generation_completed_ = false;
-  custom_event_time_.clear();
-  completed_custom_events_.clear();
-  llm_prefill_start_time_ = PerformanceClock::now();
-}
+void ARGeneration::prefillEventStartTimePoint() { llm_prefill_start_time_ = std::chrono::high_resolution_clock::now(); }
 
-void ARGeneration::prefillEventEndTimePoint() {
-  llm_prefill_end_time_ = PerformanceClock::now();
-  prefill_finished_ = prefill_started_;
-}
+void ARGeneration::prefillEventEndTimePoint() { llm_prefill_end_time_ = std::chrono::high_resolution_clock::now(); }
 
-void ARGeneration::firstTokenEventTimePoint() {
-  llm_first_token_time_ = PerformanceClock::now();
-  first_token_recorded_ = prefill_finished_;
-}
+void ARGeneration::decodeEventStartTimePoint() { llm_decode_start_time_ = std::chrono::high_resolution_clock::now(); }
 
-void ARGeneration::decodeEventStartTimePoint() {
-  if (decode_event_active_) { return; }
-  llm_decode_start_time_ = PerformanceClock::now();
-  decode_event_active_ = true;
-}
-
-void ARGeneration::decodeEventEndTimePoint() {
-  if (!decode_event_active_) { return; }
-  llm_decode_end_time_ = PerformanceClock::now();
-  llm_decode_duration_ += std::chrono::duration_cast<std::chrono::microseconds>(llm_decode_end_time_ - llm_decode_start_time_);
-  decode_event_active_ = false;
-}
-
-void ARGeneration::generationEventEndTimePoint() {
-  decodeEventEndTimePoint();
-  generation_completed_ = true;
-}
-
-bool ARGeneration::isEosToken(int64_t token_id, int64_t primary_eos_token_id) const {
-  return token_id == primary_eos_token_id || additional_eos_token_ids_.contains(token_id);
-}
+void ARGeneration::decodeEventEndTimePoint() { llm_decode_end_time_ = std::chrono::high_resolution_clock::now(); }
 
 void ARGeneration::customEventStartTimePoint(const std::string& name) {
-  completed_custom_events_.erase(name);
-  custom_event_time_[name].first = PerformanceClock::now();
+  custom_event_time_[name].first = std::chrono::high_resolution_clock::now();
 }
 
 void ARGeneration::customEventEndTimePoint(const std::string& name) {
-  auto event = custom_event_time_.find(name);
-  if (event == custom_event_time_.end()) { return; }
-  event->second.second = PerformanceClock::now();
-  completed_custom_events_.insert(name);
+  custom_event_time_[name].second = std::chrono::high_resolution_clock::now();
 }
 
 }  // namespace mllm::models

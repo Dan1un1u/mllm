@@ -2,9 +2,8 @@
 # Licensed under the MIT License.
 
 import os
-import operator
 import struct
-from typing import List
+from typing import List, Union, Dict
 from ..ffi import (
     Tensor,
     MLLM_FIND_NUMPY_AVAILABLE,
@@ -25,33 +24,6 @@ MLLM_MODEL_FILE_V2_PARAMS_NAME_LENGTH = 256
 MLLM_MODEL_FILE_V2_TENSOR_SHAPE_LENGTH = 16
 
 
-def _validate_c_string(value: str, capacity: int, field_name: str) -> None:
-    if not isinstance(value, str):
-        raise TypeError(f"{field_name} must be a string")
-    if len(value.encode("utf-8")) >= capacity:
-        raise ValueError(f"{field_name} must occupy fewer than {capacity} UTF-8 bytes")
-
-
-def _validate_shape(shape: List[int]) -> List[int]:
-    if len(shape) > MLLM_MODEL_FILE_V2_TENSOR_SHAPE_LENGTH:
-        raise ValueError(
-            "Tensor rank exceeds the ModelFileV2 descriptor capacity "
-            f"({MLLM_MODEL_FILE_V2_TENSOR_SHAPE_LENGTH})"
-        )
-    normalized_shape = []
-    for dimension in shape:
-        try:
-            dimension = operator.index(dimension)
-        except TypeError as error:
-            raise TypeError("Tensor dimensions must be integers") from error
-        if dimension < 0 or dimension > 0x7FFFFFFF:
-            raise ValueError(
-                "Tensor dimensions must fit a non-negative signed 32-bit integer"
-            )
-        normalized_shape.append(dimension)
-    return normalized_shape
-
-
 def _torch_tensor_bytes(tensor: "torch.Tensor") -> bytes:
     # Use uint8 view to preserve raw bytes for dtypes not supported by numpy.
     t = tensor.detach().cpu().contiguous()
@@ -64,11 +36,6 @@ class ModelFileV2Descriptor:
     SIZE = 532
 
     def __init__(self, model_name: str, num_params: int):
-        _validate_c_string(
-            model_name,
-            MLLM_MODEL_FILE_V2_MODEL_NAME_LENGTH,
-            "model_name",
-        )
         self.magic = MLLM_MODEL_FILE_V2_MAGIC_NUMBER
         self.version = MLLM_MODEL_FILE_V2_VERSION
         self.model_name = model_name
@@ -88,12 +55,6 @@ class ModelFileV2ParamsDescriptor:
         shape: List[int],
         name: str,
     ):
-        _validate_c_string(
-            name,
-            MLLM_MODEL_FILE_V2_PARAMS_NAME_LENGTH,
-            "tensor_name",
-        )
-        shape = _validate_shape(shape)
         self.param_id = param_id
         self.param_type = param_type
         self.param_size = param_size
@@ -143,25 +104,18 @@ class ModelFileV2:
     def __init__(self, file_path, model_name, update_mode="Static", **kwargs):
         self.file_path = file_path
         self.model_name = model_name
-        if update_mode not in ["Static", "Streaming"]:
-            raise ValueError("update_mode must be either 'Static' or 'Streaming'")
+        assert update_mode in ["Static", "Streaming"]
         self.update_mode = update_mode
         if update_mode == "Streaming":
             self.max_params_descriptor_buffer_num = kwargs.get(
                 "max_params_descriptor_buffer_num", 1024
             )
-            if (
-                not isinstance(self.max_params_descriptor_buffer_num, int)
-                or self.max_params_descriptor_buffer_num < 0
-                or self.max_params_descriptor_buffer_num > 0xFFFFFFFF
-            ):
-                raise ValueError("max_params_descriptor_buffer_num must fit uint32")
         self.v2_param_descriptor: List[ModelFileV2ParamsDescriptor] = []
         self.v2_file_header = ModelFileV2Descriptor(
-            model_name=model_name,
-            num_params=(
-                0 if update_mode == "Static" else self.max_params_descriptor_buffer_num
-            ),
+            model_name="",
+            num_params=0
+            if update_mode == "Static"
+            else self.max_params_descriptor_buffer_num,
         )
 
         # Open file
@@ -183,10 +137,6 @@ class ModelFileV2:
             self.file_handler.flush()
 
     def streaming_write(self, tensor_name, tensor_obj):
-        if self.update_mode != "Streaming":
-            raise RuntimeError("streaming_write requires Streaming update mode")
-        if self.file_handler.closed:
-            raise RuntimeError("Cannot write to a finalized ModelFileV2")
         if MLLM_FIND_TORCH_AVAILABLE and isinstance(tensor_obj, torch.Tensor):
             # PyTorch tensor
             shape = list(tensor_obj.shape)
@@ -196,7 +146,7 @@ class ModelFileV2:
             # Numpy array
             shape = list(tensor_obj.shape)
             tensor_data = tensor_obj.tobytes()
-            true_dtype = MLLM_TYPE_MAPPING[tensor_obj.dtype.type]
+            true_dtype = MLLM_TYPE_MAPPING[tensor_obj.dtype]
         elif isinstance(tensor_obj, Tensor):
             # Mllm Tensor
             shape = list(tensor_obj.shape)
@@ -204,16 +154,12 @@ class ModelFileV2:
             true_dtype = tensor_obj.dtype.to_pod()
         else:
             raise TypeError(
-                "Unsupported tensor type. Only torch.Tensor, np.ndarray and Tensor are supported."
+                "Unsupported tensor type. Only torch.Tensor and np.ndarray are supported."
             )
 
         tensor_size = len(tensor_data)
 
-        if len(self.v2_param_descriptor) >= self.max_params_descriptor_buffer_num:
-            raise ValueError(
-                "Streaming model contains more parameters than the reserved "
-                "descriptor capacity"
-            )
+        assert len(self.v2_param_descriptor) <= self.max_params_descriptor_buffer_num
         desc = ModelFileV2ParamsDescriptor(
             param_id=len(self.v2_param_descriptor),
             param_type=true_dtype,
@@ -242,14 +188,8 @@ class ModelFileV2:
         self.file_handler.seek(0, os.SEEK_END)
 
     def static_write(self, tensor_obj):
-        if self.update_mode != "Static":
-            raise RuntimeError("static_write requires Static update mode")
-        if self.file_handler.closed:
-            raise RuntimeError("Cannot write to a finalized ModelFileV2")
         # Calculate total size needed for parameter descriptors
         total_params = len(tensor_obj)
-        if total_params > 0xFFFFFFFF:
-            raise ValueError("ModelFileV2 parameter count must fit uint32")
 
         # Pre-allocate parameter descriptors list
         self.v2_param_descriptor = [None] * total_params
@@ -277,7 +217,7 @@ class ModelFileV2:
                 # Numpy array
                 shape = list(tensor.shape)
                 tensor_data = tensor.tobytes()
-                true_dtype = MLLM_TYPE_MAPPING[tensor.dtype.type]
+                true_dtype = MLLM_TYPE_MAPPING[tensor.dtype]
             elif isinstance(tensor, Tensor):
                 # Mllm Tensor
                 shape = list(tensor.shape)
@@ -321,10 +261,7 @@ class ModelFileV2:
         self.file_handler.seek(0, os.SEEK_END)
 
     def finalize(self):
-        if self.file_handler.closed:
-            raise RuntimeError("ModelFileV2 has already been finalized")
         # Update header
         self.file_handler.seek(0)
         self.file_handler.write(_pack_descriptor(self.v2_file_header))
         self.file_handler.flush()
-        self.file_handler.close()

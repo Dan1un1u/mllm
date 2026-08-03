@@ -18,7 +18,7 @@ namespace mllm::qnn {
 static const std::string QNN_Custom_Op_Package = "LLaMAPackage";
 static const std::string QNN_Context_File = "qnn_context.bin";
 
-enum class ProfilingLevel { OFF, BASIC, DETAILED, INVALID };
+enum class ProfilingLevel { OFF, BASIC, DETAILED, LINTING, OPTRACE, INVALID };
 class QNNPerf {
  public:
   static std::unique_ptr<QNNPerf> create(const QNN_INTERFACE_VER_TYPE* qnnInterface) {
@@ -128,8 +128,26 @@ class QNNBackend final : public Backend {
   [[nodiscard]] Qnn_ContextHandle_t context() const { return context_; }
 
  private:
+  struct ProfileCaptureState {
+    uint64_t executions = 0;
+    uint64_t captures = 0;
+  };
+
   bool debug_;
   ProfilingLevel profilingLevel_;
+  uint64_t profilingWarmup_ = 0;
+  uint64_t profilingEvery_ = 1;
+  uint64_t profilingMaxCaptures_ = 1;
+  bool profilingFinalize_ = false;
+  bool profilingExtendedEventsSupported_ = false;
+  bool profilingSerializationEnabled_ = true;
+  std::string profilingDirectory_ = "/data/local/tmp";
+  std::string profilingGraphFilter_;
+  std::string profilingDetailPath_;
+  std::string profilingMacroPath_;
+  std::string profilingSerializedPath_;
+  std::string backendBuildId_;
+  QnnSystemProfile_SerializationTargetHandle_t profilingSerializationHandle_ = nullptr;
   Qnn_ContextHandle_t context_ = nullptr;
   std::unique_ptr<QNNRuntime> runtime_;
   std::unique_ptr<QNNPerf> perf_;
@@ -142,10 +160,15 @@ class QNNBackend final : public Backend {
   // Graph management
   std::map<std::string, int> qnnModelIndexMap_;
   std::vector<std::shared_ptr<QNNModel>> qnnModels_;
+  std::map<std::string, ProfileCaptureState> profilingCaptureStates_;
   int currentQnnModelIndex_ = -1;
 
   // Helper methods
-  void extractBackendProfilingInfo(Qnn_ProfileHandle_t profileHandle);
+  bool shouldCaptureProfile(const std::string& graphName, uint64_t& executionIndex, bool& profileEnabled);
+  bool initializeProfilingSerialization();
+  void extractBackendProfilingInfo(Qnn_ProfileHandle_t profileHandle, const std::string& graphName,
+                                   const char* phase, uint64_t invocation, uint64_t startTimeUs,
+                                   uint64_t stopTimeUs);
 };
 
 }  // namespace mllm::qnn

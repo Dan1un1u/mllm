@@ -1,12 +1,18 @@
 #include <algorithm>
 #include <cassert>
+#include <cctype>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <fstream>
+#include <functional>
+#include <list>
 #include <memory>
+#include <chrono>
 
 #include "QnnLog.h"
+#include "HTP/QnnHtpProfile.h"
 
 #include "mllm/backends/qnn/QNNBackend.hpp"
 #include "mllm/backends/qnn/QNNUtils.hpp"
@@ -26,6 +32,106 @@
 
 namespace mllm::qnn {
 
+namespace {
+
+uint64_t monotonicTimeUs() {
+  return std::chrono::duration_cast<std::chrono::microseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+std::string getEnvString(const char* name, const std::string& fallback) {
+  const char* value = std::getenv(name);
+  return value == nullptr || value[0] == '\0' ? fallback : std::string(value);
+}
+
+uint64_t getEnvUint64(const char* name, uint64_t fallback) {
+  const char* value = std::getenv(name);
+  if (value == nullptr || value[0] == '\0') { return fallback; }
+  char* end = nullptr;
+  const auto parsed = std::strtoull(value, &end, 10);
+  return end != value && *end == '\0' ? parsed : fallback;
+}
+
+bool getEnvBool(const char* name, bool fallback) {
+  std::string value = getEnvString(name, fallback ? "1" : "0");
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return std::tolower(c); });
+  if (value == "1" || value == "true" || value == "yes" || value == "on") { return true; }
+  if (value == "0" || value == "false" || value == "no" || value == "off") { return false; }
+  return fallback;
+}
+
+ProfilingLevel getProfilingLevelFromEnv() {
+  std::string value = getEnvString("MLLM_QNN_PROFILE_LEVEL", "linting");
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return std::tolower(c); });
+  if (value == "off") { return ProfilingLevel::OFF; }
+  if (value == "basic") { return ProfilingLevel::BASIC; }
+  if (value == "detailed") { return ProfilingLevel::DETAILED; }
+  if (value == "linting") { return ProfilingLevel::LINTING; }
+  if (value == "optrace") { return ProfilingLevel::OPTRACE; }
+  MLLM_WARN("Unknown MLLM_QNN_PROFILE_LEVEL='{}'; using linting", value);
+  return ProfilingLevel::LINTING;
+}
+
+const char* profilingLevelName(ProfilingLevel level) {
+  switch (level) {
+    case ProfilingLevel::OFF: return "off";
+    case ProfilingLevel::BASIC: return "basic";
+    case ProfilingLevel::DETAILED: return "detailed";
+    case ProfilingLevel::LINTING: return "linting";
+    case ProfilingLevel::OPTRACE: return "optrace";
+    default: return "invalid";
+  }
+}
+
+const char* profileUnitName(QnnProfile_EventUnit_t unit) {
+  switch (unit) {
+    case QNN_PROFILE_EVENTUNIT_MICROSEC: return "us";
+    case QNN_PROFILE_EVENTUNIT_BYTES: return "bytes";
+    case QNN_PROFILE_EVENTUNIT_CYCLES: return "cycles";
+    case QNN_PROFILE_EVENTUNIT_COUNT: return "count";
+    case QNN_PROFILE_EVENTUNIT_OBJECT: return "object";
+    case QNN_PROFILE_EVENTUNIT_NONE: return "none";
+    default: return "backend";
+  }
+}
+
+const char* profileTypeName(QnnProfile_EventType_t type) {
+  switch (type) {
+    case QNN_PROFILE_EVENTTYPE_INIT: return "init";
+    case QNN_PROFILE_EVENTTYPE_FINALIZE: return "finalize";
+    case QNN_PROFILE_EVENTTYPE_EXECUTE: return "execute";
+    case QNN_PROFILE_EVENTTYPE_NODE: return "node";
+    case QNN_PROFILE_EVENTTYPE_EXECUTE_QUEUE_WAIT: return "queue_wait";
+    case QNN_PROFILE_EVENTTYPE_EXECUTE_PREPROCESS: return "preprocess";
+    case QNN_PROFILE_EVENTTYPE_EXECUTE_DEVICE: return "device";
+    case QNN_PROFILE_EVENTTYPE_EXECUTE_POSTPROCESS: return "postprocess";
+    case QNN_HTP_PROFILE_EVENTTYPE_NODE_WAIT: return "node_wait";
+    case QNN_HTP_PROFILE_EVENTTYPE_NODE_OVERLAP: return "node_overlap";
+    case QNN_HTP_PROFILE_EVENTTYPE_NODE_WAIT_OVERLAP: return "node_wait_overlap";
+    case QNN_HTP_PROFILE_EVENTTYPE_NODE_RESOURCEMASK: return "node_resources";
+    case QNN_HTP_PROFILE_EVENTTYPE_NODE_CRITICAL_BG_OP_ID: return "critical_bg_op";
+    case QNN_HTP_PROFILE_EVENTTYPE_NODE_WAIT_BG_OP_ID: return "wait_bg_op";
+    case QNN_HTP_PROFILE_EVENTTYPE_GRAPH_EXECUTE_CRITICAL_ACCEL_TIME_CYCLE: return "critical_path";
+    case QNN_HTP_PROFILE_EVENTTYPE_GRAPH_NUMBER_OF_HVX_THREADS: return "hvx_threads";
+    default: return type >= QNN_PROFILE_EVENTTYPE_BACKEND ? "backend" : "unknown";
+  }
+}
+
+std::string htpResourceMaskName(uint64_t mask) {
+  std::string resources;
+  const auto append = [&](const char* resource) {
+    if (!resources.empty()) { resources += ','; }
+    resources += resource;
+  };
+  if ((mask & 0x1U) != 0) { append("HVX"); }
+  if ((mask & 0x2U) != 0) { append("HMX"); }
+  if ((mask & 0x4U) != 0) { append("DMA"); }
+  return resources.empty() ? "NONE" : resources;
+}
+
+}  // namespace
+
 QNNBackend::QNNBackend() : Backend(kQNN, createQNNAllocator()) {
   // register ops
   regOpFactory<QNNAddOpFactory, QNNMulOpFactory, QNNGraphBeginOpFactory, QNNGraphEndOpFactory, QNNLinearOpFactory,
@@ -33,7 +139,25 @@ QNNBackend::QNNBackend() : Backend(kQNN, createQNNAllocator()) {
                QNNParamOpFactory, QNNSiLUOpFactory, QNNEmbeddingOpFactory>();
 
   QnnLog_Level_t qnnLogLevel = QNN_LOG_LEVEL_ERROR;  // default QNN log level
-  profilingLevel_ = ProfilingLevel::OFF;
+  profilingLevel_ = getProfilingLevelFromEnv();
+  profilingWarmup_ = getEnvUint64("MLLM_QNN_PROFILE_WARMUP", 0);
+  profilingEvery_ = std::max<uint64_t>(1, getEnvUint64("MLLM_QNN_PROFILE_EVERY", 1));
+  profilingMaxCaptures_ = getEnvUint64("MLLM_QNN_PROFILE_MAX_CAPTURES", 1);
+  if (ProfilingLevel::OPTRACE == profilingLevel_ &&
+      (profilingWarmup_ != 0 || profilingEvery_ != 1 || profilingMaxCaptures_ != 1)) {
+    MLLM_WARN("HTP Optrace must be attached on a graph's first execution and supports one isolated payload per "
+              "process; forcing warmup=0, every=1, max captures=1");
+    profilingWarmup_ = 0;
+    profilingEvery_ = 1;
+    profilingMaxCaptures_ = 1;
+  }
+  profilingFinalize_ = getEnvBool("MLLM_QNN_PROFILE_FINALIZE", false);
+  profilingSerializationEnabled_ = getEnvBool("MLLM_QNN_PROFILE_SERIALIZE", true);
+  profilingDirectory_ = getEnvString("MLLM_QNN_PROFILE_DIR", "/data/local/tmp");
+  profilingGraphFilter_ = getEnvString("MLLM_QNN_PROFILE_GRAPH", "");
+  profilingDetailPath_ = profilingDirectory_ + "/qnn_detail_profile.txt";
+  profilingMacroPath_ = profilingDirectory_ + "/qnn_macro_profile.csv";
+  profilingSerializedPath_ = profilingDirectory_ + "/qnn-profiling-data.log";
   debug_ = false;  // when set true, NATIVE tensor will be regared as APP_READ tensor
 
   // Load QNN libraries and hold handles for lifecycle management
@@ -59,7 +183,25 @@ QNNBackend::QNNBackend() : Backend(kQNN, createQNNAllocator()) {
   if (QNN_SUCCESS != runtime_->qnnInterface.backendGetBuildId((const char**)&backendBuildId)) {
     MLLM_ERROR("Unable to get build Id from the backend.");
   }
-  MLLM_INFO("QNN Backend Build Id: {}", backendBuildId == nullptr ? "" : backendBuildId);
+  backendBuildId_ = backendBuildId == nullptr ? "" : backendBuildId;
+  MLLM_INFO("QNN Backend Build Id: {}", backendBuildId_);
+  profilingExtendedEventsSupported_ = runtime_->qnnInterface.profileGetExtendedEventData != nullptr &&
+                                      runtime_->qnnInterface.propertyHasCapability(
+                                          QNN_PROPERTY_PROFILE_SUPPORTS_EXTENDED_EVENT) == QNN_PROPERTY_SUPPORTED;
+  if (ProfilingLevel::OFF != profilingLevel_) {
+    std::ofstream(profilingDetailPath_, std::ios::trunc)
+        << "# level=" << profilingLevelName(profilingLevel_) << " warmup=" << profilingWarmup_
+        << " every=" << profilingEvery_ << " max_captures_per_graph=" << profilingMaxCaptures_
+        << " extended_events=" << profilingExtendedEventsSupported_ << "\n";
+    std::ofstream(profilingMacroPath_, std::ios::trunc)
+        << "graph,execution,profiled,captured,graph_execute_us\n";
+    std::ofstream(profilingDirectory_ + "/qnn_e2e_profile.csv", std::ios::trunc)
+        << "phase,graph,chunk,module_execute_us\n";
+    initializeProfilingSerialization();
+    MLLM_INFO("QNN profiling: level={}, warmup={}, every={}, max captures/graph={}, graph filter={}, output={}",
+              profilingLevelName(profilingLevel_), profilingWarmup_, profilingEvery_, profilingMaxCaptures_,
+              profilingGraphFilter_.empty() ? "<all>" : profilingGraphFilter_, profilingDirectory_);
+  }
   if (runtime_->qnnInterface.propertyHasCapability(QNN_PROPERTY_TENSOR_SUPPORT_SPARSITY) == QNN_PROPERTY_SUPPORTED) {
     MLLM_INFO("QNN backend supports tensor sparsity");
   }
@@ -102,6 +244,11 @@ QNNBackend::~QNNBackend() {
   perf_.reset();
 
   // 4. Cleanup runtime - frees QNN backend/device handles
+  if (profilingSerializationHandle_ != nullptr &&
+      runtime_->qnnSystemInterface.systemProfileFreeSerializationTarget != nullptr) {
+    runtime_->qnnSystemInterface.systemProfileFreeSerializationTarget(profilingSerializationHandle_);
+    profilingSerializationHandle_ = nullptr;
+  }
   runtime_->qnnInterface.contextFree(context_, nullptr);
   context_ = nullptr;
   runtime_.reset();
@@ -324,6 +471,35 @@ QNNRuntime* QNNRuntime::initRuntime(ProfilingLevel profilingLevel, QnnLog_Level_
         MLLM_INFO("Detailed profiling requested. Creating Qnn Profile object.");
         if (QNN_PROFILE_NO_ERROR != qnnInterface.profileCreate(backendHandle, QNN_PROFILE_LEVEL_DETAILED, &profileHandle)) {
           MLLM_ERROR("Unable to create profile handle in the backend.");
+          return nullptr;
+        }
+      } else if (ProfilingLevel::LINTING == profilingLevel) {
+        MLLM_INFO("HTP linting profiling requested. Creating Qnn Profile object.");
+        if (QNN_PROFILE_NO_ERROR !=
+            qnnInterface.profileCreate(backendHandle, QNN_HTP_PROFILE_LEVEL_LINTING, &profileHandle)) {
+          MLLM_ERROR("Unable to create HTP linting profile handle in the backend.");
+          return nullptr;
+        }
+      } else if (ProfilingLevel::OPTRACE == profilingLevel) {
+        MLLM_INFO("HTP Optrace requested. Creating a detailed Qnn Profile object.");
+        if (QNN_PROFILE_NO_ERROR !=
+            qnnInterface.profileCreate(backendHandle, QNN_PROFILE_LEVEL_DETAILED, &profileHandle)) {
+          MLLM_ERROR("Unable to create detailed profile handle for HTP Optrace.");
+          return nullptr;
+        }
+        if (qnnInterface.profileSetConfig == nullptr ||
+            qnnInterface.propertyHasCapability(QNN_PROPERTY_PROFILE_SUPPORT_OPTRACE_CONFIG) != QNN_PROPERTY_SUPPORTED) {
+          MLLM_ERROR("The loaded QNN HTP backend does not support Optrace profile configuration.");
+          qnnInterface.profileFree(profileHandle);
+          return nullptr;
+        }
+        QnnProfile_Config_t optraceConfig = QNN_PROFILE_CONFIG_INIT;
+        optraceConfig.option = QNN_PROFILE_CONFIG_OPTION_ENABLE_OPTRACE;
+        optraceConfig.enableOptrace = 1;
+        const QnnProfile_Config_t* configs[] = {&optraceConfig, nullptr};
+        if (QNN_PROFILE_NO_ERROR != qnnInterface.profileSetConfig(profileHandle, configs)) {
+          MLLM_ERROR("Failed to enable HTP Optrace on the QNN profile handle.");
+          qnnInterface.profileFree(profileHandle);
           return nullptr;
         }
       }
@@ -638,7 +814,9 @@ bool QNNBackend::graphFinalize(const std::string& graphName) {
   qnnModel->freeCachedTensors();
 
   // Extract profiling info if enabled
-  if (ProfilingLevel::OFF != profilingLevel_) { extractBackendProfilingInfo(runtime_->profileHandle); }
+  if (ProfilingLevel::OFF != profilingLevel_ && profilingFinalize_) {
+    extractBackendProfilingInfo(runtime_->profileHandle, graphName, "finalize", 0, 0, 0);
+  }
 
   return true;
 }
@@ -700,11 +878,28 @@ void QNNBackend::graphExecute(const std::string& graphName, std::vector<Tensor>&
     wrapper->alloc();  // QNNAllocator will handle registered memory descriptor
     qnn_outputs.push_back(*(wrapper->getNativeTensor()));
   }
-
+  
+//=========================================================================================================
+  uint64_t executionIndex = 0;
+  bool profileEnabled = false;
+  const bool captureProfile = shouldCaptureProfile(graphName, executionIndex, profileEnabled);
+  const uint64_t startTimeUs = monotonicTimeUs();
   CALL_QNN(runtime_->qnnInterface.graphExecute(model->getQnnGraph(), qnn_inputs.data(), qnn_inputs.size(), qnn_outputs.data(),
-                                               qnn_outputs.size(), runtime_->profileHandle, nullptr));
-
-  if (ProfilingLevel::OFF != profilingLevel_) { extractBackendProfilingInfo(runtime_->profileHandle); }
+                                               qnn_outputs.size(), profileEnabled ? runtime_->profileHandle : nullptr, nullptr));
+  const uint64_t stopTimeUs = monotonicTimeUs();
+  const uint64_t duration = stopTimeUs - startTimeUs;
+  
+  {
+    std::ofstream macroFile(profilingMacroPath_, std::ios::app);
+    if (macroFile.is_open()) {
+      macroFile << graphName << ',' << executionIndex << ',' << profileEnabled << ',' << captureProfile << ',' << duration
+                << '\n';
+    }
+  }
+//=========================================================================================================  
+  if (captureProfile) {
+    extractBackendProfilingInfo(runtime_->profileHandle, graphName, "execute", executionIndex, startTimeUs, stopTimeUs);
+  }
 }
 
 bool QNNBackend::addTensor(const std::string& graphName, const std::string& tensorName, Qnn_TensorType_t type,
@@ -770,19 +965,198 @@ std::shared_ptr<QNNTensorWrapper> QNNBackend::getTensorWrapper(const std::string
   return qnnModel->getTensorWrapper(tensorName);
 }
 
-void QNNBackend::extractBackendProfilingInfo(Qnn_ProfileHandle_t profileHandle) {
-  // Extract profiling information from QNN backend
-  // This is a placeholder implementation
+bool QNNBackend::shouldCaptureProfile(const std::string& graphName, uint64_t& executionIndex, bool& profileEnabled) {
+  auto& state = profilingCaptureStates_[graphName];
+  executionIndex = ++state.executions;
+  profileEnabled = false;
+  if (ProfilingLevel::OFF == profilingLevel_) { return false; }
+  if (!profilingGraphFilter_.empty() && graphName != profilingGraphFilter_) { return false; }
+
+  if (ProfilingLevel::OPTRACE == profilingLevel_) {
+    // The HTP Optrace payload is updated inside a retained root event rather than
+    // appended as a new root. Keep one execution per process so the serialized log
+    // always has exactly one payload for exactly one schematic. HTP also requires
+    // the handle to be attached on the graph's first execution, so Optrace does
+    // not support an unprofiled warmup in the same process.
+    if (profilingGraphFilter_.empty()) {
+      for (const auto& [capturedGraph, capturedState] : profilingCaptureStates_) {
+        if (capturedGraph != graphName && capturedState.captures != 0) { return false; }
+      }
+    }
+    if (state.captures != 0) { return false; }
+    profileEnabled = true;
+    ++state.captures;
+    return true;
+  }
+
+  // HTP linting cannot be attached to a graph after that graph has already run without
+  // a profile handle. Keep profiling continuously enabled from the first execution
+  // through the final requested capture. Warmup and interval executions are profiled
+  // but intentionally not serialized.
+  const bool captureLimitReached = profilingMaxCaptures_ != 0 && state.captures >= profilingMaxCaptures_;
+  if (captureLimitReached) { return false; }
+  profileEnabled = true;
+
+  if (executionIndex <= profilingWarmup_) { return false; }
+  if ((executionIndex - profilingWarmup_ - 1) % profilingEvery_ != 0) { return false; }
+  ++state.captures;
+  return true;
+}
+
+bool QNNBackend::initializeProfilingSerialization() {
+  if (!profilingSerializationEnabled_) { return false; }
+  const auto& system = runtime_->qnnSystemInterface;
+  if (system.systemProfileCreateSerializationTarget == nullptr ||
+      system.systemProfileSerializeEventData == nullptr ||
+      system.systemProfileFreeSerializationTarget == nullptr) {
+    MLLM_WARN("QNN System profile serialization is unavailable; keeping text profiling only.");
+    return false;
+  }
+
+  std::ofstream(profilingSerializedPath_, std::ios::binary | std::ios::trunc).close();
+  QnnSystemProfile_SerializationFileHeader_t header{"mllm", "1", backendBuildId_.c_str()};
+  QnnSystemProfile_SerializationTargetFile_t file{"qnn-profiling-data.log", profilingDirectory_.c_str()};
+  QnnSystemProfile_SerializationTarget_t target{};
+  target.type = QNN_SYSTEM_PROFILE_SERIALIZATION_TARGET_FILE;
+  target.file = file;
+  QnnSystemProfile_SerializationTargetConfig_t config{};
+  config.type = QNN_SYSTEM_PROFILE_SERIALIZATION_TARGET_CONFIG_SERIALIZATION_HEADER;
+  config.serializationHeader = header;
+  const auto status = system.systemProfileCreateSerializationTarget(target, &config, 1,
+                                                                     &profilingSerializationHandle_);
+  if (status != QNN_SYSTEM_PROFILE_NO_ERROR) {
+    MLLM_WARN("Failed to create QNN profile serialization target: {}", static_cast<int>(status));
+    profilingSerializationHandle_ = nullptr;
+    return false;
+  }
+  return true;
+}
+
+void QNNBackend::extractBackendProfilingInfo(Qnn_ProfileHandle_t profileHandle, const std::string& graphName,
+                                             const char* phase, uint64_t invocation, uint64_t startTimeUs,
+                                             uint64_t stopTimeUs) {
   if (profileHandle == nullptr) { return; }
 
   const QnnProfile_EventId_t* profileEvents{nullptr};
   uint32_t numEvents{0};
   if (QNN_PROFILE_NO_ERROR != runtime_->qnnInterface.profileGetEvents(profileHandle, &profileEvents, &numEvents)) {
-    MLLM_WARN("Failed to get profile events");
     return;
   }
+  std::ofstream detailFile(profilingDetailPath_, std::ios::app);
+  if (!detailFile.is_open()) return;
 
-  MLLM_INFO("Extracted {} profiling events", numEvents);
+  detailFile << "BEGIN_PROFILE|phase=" << phase << "|graph=" << graphName << "|invocation=" << invocation
+             << "|host_start_us=" << startTimeUs << "|host_stop_us=" << stopTimeUs
+             << "|host_duration_us=" << (stopTimeUs >= startTimeUs ? stopTimeUs - startTimeUs : 0)
+             << "|root_events=" << numEvents << '\n';
+
+  uint64_t eventCount = 0;
+  std::function<void(QnnProfile_EventId_t, uint32_t)> dumpEvent;
+  dumpEvent = [&](QnnProfile_EventId_t eventId, uint32_t depth) {
+    if (depth > 64) {
+      detailFile << "EVENT_ERROR|depth=" << depth << "|reason=max_depth\n";
+      return;
+    }
+    QnnProfile_EventData_t eventData = QNN_PROFILE_EVENT_DATA_INIT;
+    if (QNN_PROFILE_NO_ERROR != runtime_->qnnInterface.profileGetEventData(eventId, &eventData)) { return; }
+
+    uint64_t timestampUs = 0;
+    if (profilingExtendedEventsSupported_) {
+      QnnProfile_ExtendedEventData_t extended = QNN_PROFILE_EXTENDED_EVENT_DATA_INIT;
+      if (QNN_PROFILE_NO_ERROR == runtime_->qnnInterface.profileGetExtendedEventData(eventId, &extended) &&
+          extended.version == QNN_PROFILE_DATA_VERSION_1) {
+        timestampUs = extended.v1.timestamp;
+      }
+    }
+
+    ++eventCount;
+    detailFile << "EVENT|depth=" << depth << "|type=" << profileTypeName(eventData.type)
+               << "|type_id=" << eventData.type << "|unit="
+               << (eventData.type == QNN_HTP_PROFILE_EVENTTYPE_NODE_RESOURCEMASK ? "mask"
+                                                                                 : profileUnitName(eventData.unit))
+               << "|unit_id=" << eventData.unit << "|value=" << eventData.value
+               << (eventData.type == QNN_HTP_PROFILE_EVENTTYPE_NODE_RESOURCEMASK
+                       ? "|resources=" + htpResourceMaskName(eventData.value)
+                       : "")
+               << "|timestamp_us=" << timestampUs << "|identifier="
+               << (eventData.identifier ? eventData.identifier : "") << '\n';
+
+    const QnnProfile_EventId_t* children = nullptr;
+    uint32_t numChildren = 0;
+    if (QNN_PROFILE_NO_ERROR == runtime_->qnnInterface.profileGetSubEvents(eventId, &children, &numChildren)) {
+      for (uint32_t i = 0; i < numChildren; ++i) { dumpEvent(children[i], depth + 1); }
+    }
+  };
+
+  for (uint32_t i = 0; i < numEvents; ++i) {
+    dumpEvent(profileEvents[i], 0);
+  }
+  detailFile << "END_PROFILE|phase=" << phase << "|graph=" << graphName << "|invocation=" << invocation
+             << "|events=" << eventCount << "\n\n";
+
+  if (profilingSerializationHandle_ == nullptr) { return; }
+
+  std::list<std::vector<QnnSystemProfile_ProfileEventV1_t>> childStorage;
+  std::function<bool(QnnProfile_EventId_t, QnnSystemProfile_ProfileEventV1_t&)> buildEvent;
+  buildEvent = [&](QnnProfile_EventId_t eventId, QnnSystemProfile_ProfileEventV1_t& output) {
+    output = QNN_SYSTEM_PROFILE_EVENT_V1_INIT;
+    QnnProfile_EventData_t data = QNN_PROFILE_EVENT_DATA_INIT;
+    if (QNN_PROFILE_NO_ERROR != runtime_->qnnInterface.profileGetEventData(eventId, &data)) { return false; }
+    bool usedExtendedData = false;
+    if (profilingExtendedEventsSupported_ &&
+        (data.unit == QNN_PROFILE_EVENTUNIT_OBJECT || data.type == QNN_PROFILE_EVENTTYPE_TRACE)) {
+      QnnProfile_ExtendedEventData_t extended = QNN_PROFILE_EXTENDED_EVENT_DATA_INIT;
+      if (QNN_PROFILE_NO_ERROR == runtime_->qnnInterface.profileGetExtendedEventData(eventId, &extended)) {
+        output.type = QNN_SYSTEM_PROFILE_EXTENDED_EVENT_DATA;
+        output.extendedEventData = extended;
+        usedExtendedData = true;
+      }
+    }
+    if (!usedExtendedData) {
+      output.type = QNN_SYSTEM_PROFILE_EVENT_DATA;
+      output.eventData = data;
+    }
+
+    const QnnProfile_EventId_t* children = nullptr;
+    uint32_t numChildren = 0;
+    if (QNN_PROFILE_NO_ERROR != runtime_->qnnInterface.profileGetSubEvents(eventId, &children, &numChildren) ||
+        numChildren == 0) {
+      return true;
+    }
+    std::vector<QnnSystemProfile_ProfileEventV1_t> childEvents;
+    childEvents.reserve(numChildren);
+    for (uint32_t i = 0; i < numChildren; ++i) {
+      QnnSystemProfile_ProfileEventV1_t child = QNN_SYSTEM_PROFILE_EVENT_V1_INIT;
+      if (buildEvent(children[i], child)) { childEvents.push_back(child); }
+    }
+    childStorage.push_back(std::move(childEvents));
+    output.profileSubEventData = childStorage.back().data();
+    output.numSubEvents = childStorage.back().size();
+    return true;
+  };
+
+  std::vector<QnnSystemProfile_ProfileEventV1_t> serializedEvents;
+  serializedEvents.reserve(numEvents);
+  for (uint32_t i = 0; i < numEvents; ++i) {
+    QnnSystemProfile_ProfileEventV1_t event = QNN_SYSTEM_PROFILE_EVENT_V1_INIT;
+    if (buildEvent(profileEvents[i], event)) { serializedEvents.push_back(event); }
+  }
+
+  QnnSystemProfile_ProfileData_t profileData = QNN_SYSTEM_PROFILE_DATA_INIT;
+  profileData.version = QNN_SYSTEM_PROFILE_DATA_VERSION_1;
+  profileData.v1.header.methodType = std::strcmp(phase, "execute") == 0
+                                         ? QNN_SYSTEM_PROFILE_METHOD_TYPE_BACKEND_EXECUTE
+                                         : QNN_SYSTEM_PROFILE_METHOD_TYPE_BACKEND_FINALIZE;
+  profileData.v1.header.startTime = startTimeUs;
+  profileData.v1.header.stopTime = stopTimeUs;
+  profileData.v1.header.graphName = graphName.c_str();
+  profileData.v1.profilingEvents = serializedEvents.data();
+  profileData.v1.numProfilingEvents = serializedEvents.size();
+  const QnnSystemProfile_ProfileData_t* dataPtr = &profileData;
+  if (QNN_SUCCESS != runtime_->qnnSystemInterface.systemProfileSerializeEventData(
+                         profilingSerializationHandle_, &dataPtr, 1)) {
+    MLLM_WARN("Failed to serialize QNN profiling data for graph {} invocation {}", graphName, invocation);
+  }
 }
 
 }  // namespace mllm::qnn

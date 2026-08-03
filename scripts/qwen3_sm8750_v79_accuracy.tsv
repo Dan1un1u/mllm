@@ -1,0 +1,101 @@
+# id	match_mode	expected alternatives	prompt
+math_01	number	56	/no_think What is 7 multiplied by 8? Output only the final number.
+math_02	number	76	/no_think What is 123 minus 47? Output only the final number.
+math_03	number	42	/no_think What is 15 plus 27? Output only the final number.
+math_04	number	108	/no_think What is 9 multiplied by 12? Output only the final number.
+math_05	number	12	/no_think What is 144 divided by 12? Output only the final number.
+math_06	number	32	/no_think What is 2 to the power of 5? Output only the final number.
+math_07	number	9	/no_think What is the square root of 81? Output only the final number.
+math_08	number	20	/no_think What is 25 percent of 80? Output only the final number.
+math_09	number	0.75|3/4	/no_think Convert three quarters to a decimal. Output only the final value.
+math_10	number	5	/no_think What is the arithmetic mean of 2, 4, 6, and 8? Output only the final number.
+math_11	number	28	/no_think A square has side length 7. What is its perimeter? Output only the number.
+math_12	number	54	/no_think A rectangle is 6 by 9. What is its area? Output only the number.
+math_13	number	120	/no_think How many minutes are in 2 hours? Output only the number.
+math_14	number	4.7	/no_think What is 3.5 plus 1.2? Output only the final number.
+math_15	number	5	/no_think What is negative 3 plus 8? Output only the final number.
+math_16	number	40	/no_think What is 1000 divided by 25? Output only the final number.
+math_17	number	121	/no_think What is 11 squared? Output only the final number.
+math_18	number	120	/no_think What is 5 factorial? Output only the final number.
+math_19	number	2	/no_think What is the remainder when 17 is divided by 5? Output only the number.
+math_20	number	10	/no_think What is 0.2 multiplied by 50? Output only the final number.
+math_21	number	32	/no_think Give the next number in this sequence: 2, 4, 8, 16. Output only the number.
+math_22	number	8	/no_think Give the next number in this sequence: 1, 1, 2, 3, 5. Output only the number.
+math_23	number	2	/no_think Give the next number in this sequence: 10, 8, 6, 4. Output only the number.
+math_24	number	8	/no_think Solve x plus 7 equals 15. Output only x.
+math_25	number	7	/no_think Solve 3 times x equals 21. Output only x.
+logic_01	choice	yes|true	/no_think All whales are mammals and all mammals are animals. Is a whale an animal? Answer only yes or no.
+logic_02	choice	no|false	/no_think No birds are mammals. A robin is a bird. Is a robin a mammal? Answer only yes or no.
+logic_03	choice	yes|true	/no_think If today is Monday, is tomorrow Tuesday? Answer only yes or no.
+logic_04	choice	no|false	/no_think If today is Friday, is yesterday Saturday? Answer only yes or no.
+logic_05	choice	equal|same	/no_think Compare 0.75 with 3/4. Answer only equal, greater, or less.
+logic_06	choice	greater	/no_think Compare 9 with 6. Answer only greater, equal, or less.
+logic_07	choice	less	/no_think Compare negative 2 with positive 1. Answer only greater, equal, or less.
+logic_08	choice	true|yes	/no_think Is the statement "a triangle has three sides" true or false? Output only true or false.
+logic_09	choice	false|no	/no_think Is the statement "an even number can never be divided by 2" true or false? Output only true or false.
+logic_10	choice	blue	/no_think A box contains a red ball and a blue ball. The red ball is removed. Which color remains? Output only the color.
+logic_11	choice	north	/no_think You face east and turn left. Which direction are you facing? Output only north, south, east, or west.
+logic_12	choice	4	/no_think Which option is the only even number: 3, 4, or 5? Output only the option value.
+logic_13	choice	cat	/no_think Which is an animal: table, cat, or stone? Output only the word.
+logic_14	choice	circle	/no_think Which shape has no corners: square, triangle, or circle? Output only the shape.
+logic_15	choice	second	/no_think In the order A, B, C, what position is B? Output only first, second, or third.
+science_01	text	H2O|H₂O	/no_think What is the chemical formula of water? Output only the formula.
+science_02	text	O2|O₂	/no_think What is the molecular formula of oxygen gas? Output only the formula.
+science_03	text	oxygen	/no_think Which gas do humans need to breathe for respiration? Output only the gas name.
+science_04	text	carbon dioxide|CO2|CO₂	/no_think Which gas do plants take in during photosynthesis? Output only the gas name or formula.
+science_05	text	Mars	/no_think Which planet is known as the Red Planet? Output only the planet name.
+science_06	text	Jupiter	/no_think Which is the largest planet in the Solar System? Output only the planet name.
+science_07	text	Sun	/no_think What star is at the center of the Solar System? Output only its name.
+science_08	text	gravity	/no_think What force pulls objects toward Earth? Output only the force name.
+science_09	text	solid	/no_think At room temperature, is ice a solid, liquid, or gas? Output only one word.
+science_10	text	100	/no_think At standard atmospheric pressure, at what Celsius temperature does water boil? Output only the number.
+science_11	text	0	/no_think At standard atmospheric pressure, at what Celsius temperature does water freeze? Output only the number.
+science_12	text	heart	/no_think Which human organ pumps blood? Output only the organ name.
+science_13	text	skin	/no_think What is the largest organ of the human body? Output only the organ name.
+science_14	text	photosynthesis	/no_think What process lets green plants use light to make food? Output only the process name.
+science_15	text	electron	/no_think Which subatomic particle has a negative electric charge? Output only its name.
+geography_01	text	Paris	/no_think What is the capital of France? Output only the city name.
+geography_02	text	Tokyo	/no_think What is the capital of Japan? Output only the city name.
+geography_03	text	Beijing|北京	/no_think What is the capital of China? Output only the city name.
+geography_04	text	Rome	/no_think What is the capital of Italy? Output only the city name.
+geography_05	text	Canberra	/no_think What is the capital of Australia? Output only the city name.
+geography_06	text	Africa	/no_think On which continent is Egypt? Output only the continent name.
+geography_07	text	Asia	/no_think On which continent is India? Output only the continent name.
+geography_08	text	Pacific|Pacific Ocean	/no_think What is the largest ocean on Earth? Output only its name.
+geography_09	text	Nile	/no_think Which famous river flows through Egypt? Output only the river name.
+geography_10	text	Mount Everest|Everest	/no_think What is Earth's highest mountain above sea level? Output only its name.
+language_01	text	苹果	/no_think Translate the English word "apple" into Chinese. Output only the translation.
+language_02	text	水	/no_think Translate the English word "water" into Chinese. Output only the translation.
+language_03	text	猫	/no_think Translate the English word "cat" into Chinese. Output only the translation.
+language_04	text	红色|红	/no_think Translate the English word "red" into Chinese. Output only the translation.
+language_05	text	book	/no_think Translate the Chinese word "书" into English. Output only the translation.
+language_06	text	sun	/no_think Translate the Chinese word "太阳" into English. Output only the translation.
+language_07	text	thank you|thanks	/no_think Translate "谢谢" into English. Output only the translation.
+language_08	text	happy|glad|joyful|joy	/no_think Give a simple English synonym for "glad". Output only one word.
+language_09	text	big|large|huge	/no_think Give a simple English synonym for "large". Output only one word.
+language_10	text	cold	/no_think Give the English opposite of "hot". Output only one word.
+language_11	text	down	/no_think Give the English opposite of "up". Output only one word.
+language_12	text	child	/no_think What is the singular form of "children"? Output only one word.
+language_13	text	mice	/no_think What is the plural form of "mouse"? Output only one word.
+language_14	text	running	/no_think Complete with the correct form: "She is ___." Use the verb run. Output only one word.
+language_15	text	went	/no_think What is the simple past tense of "go"? Output only one word.
+code_01	number	4	/no_think In Python, what is len([10, 20, 30, 40])? Output only the integer.
+code_02	number	3	/no_think In Python, what is len("QNN")? Output only the integer.
+code_03	number	6	/no_think In Python, what is sum([1, 2, 3])? Output only the integer.
+code_04	number	8	/no_think In Python, what is 2 ** 3? Output only the integer.
+code_05	number	1	/no_think In Python, what is 7 % 3? Output only the integer.
+code_06	choice	true	/no_think In Python, what does 3 < 5 evaluate to? Output only true or false.
+code_07	text	int|integer	/no_think In Python, what is the type name of the value 7? Output only the type name.
+code_08	number	3	/no_think How many iterations does "for i in range(3)" perform in Python? Output only the integer.
+code_09	text	B	/no_think What does chr(66) return in Python? Output only the character.
+code_10	number	2	/no_think In zero-based indexing, what is the index of the third element? Output only the integer.
+instruction_01	exact	QNN_OK	/no_think Output exactly QNN_OK and nothing else.
+instruction_02	exact	SM8750	/no_think Output exactly SM8750 and nothing else.
+instruction_03	exact	HMX_HVX	/no_think Output exactly HMX_HVX and nothing else.
+instruction_04	exact	abc123	/no_think Output exactly abc123 and nothing else.
+instruction_05	exact	READY	/no_think Output exactly READY and nothing else.
+instruction_06	exact	量化	/no_think 只输出“量化”两个字，不要输出其他内容。
+instruction_07	exact	高通	/no_think 只输出“高通”两个字，不要输出其他内容。
+instruction_08	exact	4bit	/no_think Output exactly 4bit and nothing else.
+instruction_09	exact	A_B_C	/no_think Output exactly A_B_C and nothing else.
+instruction_10	exact	done	/no_think Output exactly done in lowercase and nothing else.

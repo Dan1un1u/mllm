@@ -9,14 +9,11 @@
 
 #include <string>
 #include <sstream>
-#include <limits>
-#include <stdexcept>
 #include <fmt/core.h>
 #include <fmt/base.h>
 #include <fmt/ostream.h>
 
 #include "mllm/mllm.hpp"
-#include "mllm/backends/cpu/kernels/common/kai_w4a32_pack.hpp"
 #include "mllm/nn/Functional.hpp"
 #include "mllm/ffi/Object.hh"
 #include "mllm/utils/CPUArchHelper.hpp"
@@ -381,43 +378,51 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 //===----------------------------------------------------------------------===//
 // REGISTER: Quantize && Packing Functions.
 //===----------------------------------------------------------------------===//
+#if defined(MLLM_HOST_ARCH_ARM64) || defined(MLLM_HOST_ARCH_ARM)
+#include "mllm/backends/cpu/kernels/arm/linear/kai.hpp"
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def(
       "mllm.quantize_pack.KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk",
       [](const std::string& tile_cfg_name, const mllm::ffi::Tensor& ffi_weight,
          const mllm::ffi::Tensor& ffi_bias) -> mllm::ffi::Tensor {
+        ::mllm::cpu::arm::KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk kai_helper_;
+
         auto weight = ffi_weight.get()->mllm_tensor_;
         auto bias = ffi_bias.get()->mllm_tensor_;
 
         auto weight_shape = weight.shape();
-        if (weight_shape.size() != 2 || weight_shape[0] <= 0 || weight_shape[1] <= 0 || weight.dtype() != mllm::kFloat32) {
-          throw std::invalid_argument("KAI W4A32 packing requires a non-empty rank-2 float32 weight tensor");
-        }
         auto out_channels = weight_shape[0];
         auto in_channels = weight_shape[1];
-        if (bias) {
-          auto bias_shape = bias.shape();
-          if (bias_shape.size() != 1 || bias_shape[0] != out_channels || bias.dtype() != mllm::kFloat32) {
-            throw std::invalid_argument("KAI W4A32 bias must be a float32 vector matching the output channels");
-          }
+
+        mllm::cpu::arm::KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::Tiles tile_cfg;
+        tile_cfg = mllm::cpu::arm::KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::Tiles::qai8dxp1x8_qsi4c32p4x8_1x4x32;
+
+        if (tile_cfg_name == "qai8dxp1x8_qsi4c32p4x8_1x4x32") {
+          tile_cfg = mllm::cpu::arm::KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::Tiles::qai8dxp1x8_qsi4c32p4x8_1x4x32;
+        } else if (tile_cfg_name == "qai8dxp1x8_qsi4c32p8x8_1x8x32") {
+          tile_cfg = mllm::cpu::arm::KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::Tiles::qai8dxp1x8_qsi4c32p8x8_1x8x32;
+        } else if (tile_cfg_name == "qai8dxp4x8_qsi4c32p4x8_8x4x32") {
+          tile_cfg = mllm::cpu::arm::KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::Tiles::qai8dxp4x8_qsi4c32p4x8_8x4x32;
+        } else if (tile_cfg_name == "qai8dxp4x8_qsi4c32p4x8_16x4x32") {
+          tile_cfg = mllm::cpu::arm::KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::Tiles::qai8dxp4x8_qsi4c32p4x8_16x4x32;
+        } else if (tile_cfg_name == "qai8dxp4x8_qsi4c32p8x8_4x8x32") {
+          tile_cfg = mllm::cpu::arm::KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::Tiles::qai8dxp4x8_qsi4c32p8x8_4x8x32;
+        } else if (tile_cfg_name == "qai8dxp1x4_qsi4c32p4x4_1x4") {
+          tile_cfg = mllm::cpu::arm::KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::Tiles::qai8dxp1x4_qsi4c32p4x4_1x4;
         }
 
         // pack_rhs_size return byte size.
-        const auto new_weights_size = ::mllm::cpu::common::kaiW4A32PackedSize(out_channels, in_channels, tile_cfg_name);
-        if (new_weights_size > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
-          throw std::overflow_error("KAI W4A32 packed tensor exceeds the supported tensor dimension");
-        }
+        int32_t new_weights_size = kai_helper_.quant_pack_rhs_size(out_channels, in_channels, tile_cfg);
 
         // NOTE:
         // We used a flatter byte buffer to represent the packed weight.
         // The packed weight can't be read or manipulated as a normal tensor.
-        mllm::Tensor new_weights = mllm::Tensor::empty({static_cast<int>(new_weights_size)}, mllm::kByte, mllm::kCPU).alloc();
+        mllm::Tensor new_weights = mllm::Tensor::empty({new_weights_size}, mllm::kByte, mllm::kCPU).alloc();
 
         // Perform quantize
-        ::mllm::cpu::common::kaiW4A32QuantizeAndPack(new_weights.ptr<mllm::mllm_byte_t>(), weight.ptr<mllm::mllm_fp32_t>(),
-                                                     bias ? bias.ptr<mllm::mllm_fp32_t>() : nullptr, out_channels, in_channels,
-                                                     tile_cfg_name);
+        kai_helper_.quant_pack_rhs_offline(new_weights.ptr<mllm::mllm_byte_t>(), weight.ptr<mllm::mllm_fp32_t>(),
+                                           bias ? bias.ptr<mllm::mllm_fp32_t>() : nullptr, out_channels, in_channels, tile_cfg);
 
         // Assign new weights to the linear op
         new_weights.setName(weight.name());
@@ -425,3 +430,4 @@ TVM_FFI_STATIC_INIT_BLOCK() {
         return mllm::ffi::Tensor(new_weights);
       });
 }
+#endif

@@ -1,17 +1,13 @@
 file(GLOB_RECURSE MLLM_CPU_BACKEND_OPS_SRC ${CMAKE_CURRENT_LIST_DIR}/ops/*.cpp)
 file(GLOB_RECURSE MLLM_CPU_BACKEND_KERNELS_COMMON_SRC ${CMAKE_CURRENT_LIST_DIR}/kernels/common/*.cpp)
 
-set(kleidiai_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/vendors/kleidiai)
-set(
-  MLLM_KAI_W4A32_PACK_SOURCE
-  ${kleidiai_SOURCE_DIR}/kai/ukernels/matmul/pack/kai_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0.c)
-
 if(MLLM_BUILD_ARM_BACKEND)
   file(GLOB_RECURSE MLLM_CPU_BACKEND_KERNELS_SRC ${CMAKE_CURRENT_LIST_DIR}/kernels/arm/*.cpp)
 
   # We treat kleidiai as a external lib.
   set(KLEIDIAI_BUILD_TESTS OFF)
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/vendors/kleidiai EXCLUDE_FROM_ALL)
+  set(kleidiai_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/vendors/kleidiai)
 
   set(MLLM_KAI_INCLUDE_DIRS
     $<BUILD_INTERFACE:${kleidiai_SOURCE_DIR}/>
@@ -62,7 +58,7 @@ if(MLLM_BUILD_ARM_BACKEND)
     ${kleidiai_SOURCE_DIR}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4c32p/kai_matmul_clamp_f32_qai8dxp4x8_qsi4c32p4x8_16x4x32_neon_i8mm_asm.S
     ${kleidiai_SOURCE_DIR}/kai/ukernels/matmul/pack/kai_lhs_quant_pack_qai8dxp_f32.c
     ${kleidiai_SOURCE_DIR}/kai/ukernels/matmul/pack/kai_rhs_pack_kxn_qsi4c32p_qsu4c32s1s0.c
-    ${MLLM_KAI_W4A32_PACK_SOURCE}
+    ${kleidiai_SOURCE_DIR}/kai/ukernels/matmul/pack/kai_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0.c
     # for qsi8d32p_qai4c32p
     ${kleidiai_SOURCE_DIR}/kai/ukernels/matmul/matmul_clamp_f16_qsi8d32p_qai4c32p/kai_matmul_clamp_f16_qsi8d32p1x8_qai4c32p4x8_1x4_neon_dotprod.c
     ${kleidiai_SOURCE_DIR}/kai/ukernels/matmul/matmul_clamp_f16_qsi8d32p_qai4c32p/kai_matmul_clamp_f16_qsi8d32p4x8_qai4c32p4x8_8x4_neon_i8mm.c
@@ -119,16 +115,10 @@ else()
     ${MLLM_CPU_BACKEND_OPS_SRC}
     ${MLLM_CPU_BACKEND_KERNELS_SRC}
     ${MLLM_CPU_BACKEND_KERNELS_COMMON_SRC}
-    ${MLLM_KAI_W4A32_PACK_SOURCE}
     CPUAllocator.cpp
     CPUBackend.cpp
     CPUDispatcher.cpp)
-  target_include_directories(
-    MllmCPUBackend
-    PRIVATE
-      ${kleidiai_SOURCE_DIR}
-      ${kleidiai_SOURCE_DIR}/kai/ukernels/matmul/pack)
-  target_link_libraries(MllmCPUBackend PUBLIC hwy)
+    target_link_libraries(MllmCPUBackend PUBLIC hwy)
 endif()
 
 target_link_libraries(MllmCPUBackend PUBLIC MllmRT)

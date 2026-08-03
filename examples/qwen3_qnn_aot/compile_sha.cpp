@@ -29,6 +29,11 @@ MLLM_MAIN({
                            .def("/opt/qcom/aistack/qairt/2.41.0.251128/lib/x86_64-linux-clang/")
                            .help("QNN AOT Environment path.");
   auto& output_context_path = Argparse::add<std::string>("-o|--output_context_name").help("Output QNN context path.");
+  auto& schematic_only = Argparse::add<bool>("--schematic_only")
+                             .help("Finalize graph(s) and emit Optrace schematics without saving a context binary.");
+  auto& trace_seq = Argparse::add<int>("--trace_seq")
+                        .def(0)
+                        .help("Trace only one graph (1 or 32); 0 traces both graphs.");
 
   Argparse::parse(argc, argv);
 
@@ -44,10 +49,13 @@ MLLM_MAIN({
     Argparse::printHelp();
     return -1;
   }
-  if (!output_context_path.isSet()) {
+  if (!output_context_path.isSet() && !schematic_only.get()) {
     MLLM_ERROR_EXIT(mllm::ExitCode::kCoreError, "No output context path provided");
     Argparse::printHelp();
     return -1;
+  }
+  if (trace_seq.get() != 0 && trace_seq.get() != 1 && trace_seq.get() != 32) {
+    MLLM_ERROR_EXIT(mllm::ExitCode::kCoreError, "--trace_seq must be 0, 1, or 32");
   }
 
   auto model_cfg = mllm::models::qwen3::Qwen3Config(model_cfg_path.get());
@@ -89,14 +97,26 @@ MLLM_MAIN({
     mllm::redirect(mir_path, [&]() { mllm::print(ir["model"]); });
   };
 
-  trace_and_dump(32, "qwen3_qnn_aot_sha_32.mir");
-  trace_and_dump(1, "qwen3_qnn_aot_sha_1.mir");
+  if (trace_seq.get() == 0 || trace_seq.get() == 32) {
+    trace_and_dump(32, "qwen3_qnn_aot_sha_32.mir");
+  }
+  if (trace_seq.get() == 0 || trace_seq.get() == 1) {
+    trace_and_dump(1, "qwen3_qnn_aot_sha_1.mir");
+  }
 
-  qnn_aot_env.saveContext("context.0", output_context_path.get());
+  if (!schematic_only.get()) {
+    qnn_aot_env.saveContext("context.0", output_context_path.get());
+  }
 
   mllm::print("SHA compilation completed successfully!");
   mllm::print("Output files:");
-  mllm::print("  - qwen3_qnn_aot_sha_32.mir (IR dump for seq=32)");
-  mllm::print("  - qwen3_qnn_aot_sha_1.mir (IR dump for seq=1)");
-  mllm::print("  - " + output_context_path.get() + " (QNN context)");
+  if (trace_seq.get() == 0 || trace_seq.get() == 32) {
+    mllm::print("  - qwen3_qnn_aot_sha_32.mir (IR dump for seq=32)");
+  }
+  if (trace_seq.get() == 0 || trace_seq.get() == 1) {
+    mllm::print("  - qwen3_qnn_aot_sha_1.mir (IR dump for seq=1)");
+  }
+  if (!schematic_only.get()) {
+    mllm::print("  - " + output_context_path.get() + " (QNN context)");
+  }
 });

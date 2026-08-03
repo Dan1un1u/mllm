@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Qwen3 SM8750 V79 CPU fallback audit</title>
+<style>
+:root{--ink:#17263a;--muted:#617286;--line:#d9e2eb;--paper:#fff;--bg:#edf2f6;--ok:#16825d;--bad:#bd3f4a;--blue:#2868aa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 Inter,"Noto Sans SC",system-ui,sans-serif}
+header{padding:28px 40px;background:linear-gradient(125deg,#17375e,#23728a);color:#fff}h1{margin:0 0 5px;font-size:27px}header p{margin:0;color:#dbeaf3}
+main{max-width:1180px;margin:16px auto;padding:0 16px 42px}section{margin:14px 0;padding:18px;background:var(--paper);border:1px solid var(--line);border-radius:12px}
+.verdict{border-left:6px solid var(--ok)}.verdict.fail{border-left-color:var(--bad)}.big{font-size:25px;font-weight:750;color:var(--ok)}.fail .big{color:var(--bad)}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(190px,1fr));gap:10px}.card{padding:13px;border:1px solid var(--line);border-radius:9px;background:#f9fbfd}.card small{display:block;color:var(--muted)}.card b{display:block;margin-top:4px;font-size:17px}
+table{width:100%;border-collapse:collapse}th,td{padding:8px 9px;border-bottom:1px solid var(--line);text-align:left}th{background:#edf4f8}code{background:#eef3f7;padding:1px 4px;border-radius:4px}.note{padding:10px 13px;border-left:4px solid #df982d;background:#fff7e8}.ok{color:var(--ok)}.bad{color:var(--bad)}li{margin:5px 0}@media(max-width:760px){.grid{grid-template-columns:1fr}section{overflow-x:auto}}
+</style></head><body>
+<header><h1>Qwen3-1.7B × SM8750 V79：CPU fallback 审计</h1>
+<p>QNN backend 映射检查 × 每次 graphExecute 再检查 × HTP Optrace 节点域 × 运行错误日志</p></header><main>
+<section class="verdict "><div class="big">未发现图内 CPU fallback</div>
+<p>这里的结论限定为：<b>QNN AOT 图中的模型算子是否退回 QNN CPU backend 执行</b>。它不声称整个应用没有 CPU 工作；tokenization、sampling、tensor setup、FastRPC 与 QNN host orchestration 本来就在 CPU 上。</p></section>
+<section><h2>四层交叉证据</h2><div class="grid">
+<div class="card"><small>实际 backend</small><b class="ok">HTP mapped: True</b><span><code>libQnnHtp.so,libQnnHtpV79Stub.so,libQnnSystem.so</code></span></div>
+<div class="card"><small>CPU backend 延迟加载检查</small><b class="ok">libQnnCpu mapped: False</b><span>不仅初始化时检查；每次 graphExecute 返回后都重新扫描。</span></div>
+<div class="card"><small>HTP Optrace 节点执行域</small><b class="ok">s1 7,481 / s32 7,706 nodes: HTP</b><span>CPU resource matches: 0</span></div>
+<div class="card"><small>运行期错误</small><b class="ok">graph/fallback errors: 0</b><span>成功完成 s32 prefill 与 s1 decode。</span></div>
+<div class="card"><small>QNN build</small><b>v2.47.0.260601114230</b><span>Native HTP V79 context on SM8750.</span></div>
+<div class="card"><small>图边界采样</small><b>24 calls</b><span>Perfetto marker pair: 0/24；设备 shell SELinux 阻止 trace_marker 写入，CSV 改用 CLOCK_BOOTTIME 边界供 sched trace 对齐。</span></div>
+</div></section>
+<section><h2>图调用内 CPU 活动</h2>
+<table><thead><tr><th>Graph</th><th>Calls</th><th>Median wall</th><th>Caller CPU / wall</th><th>All process CPU / wall</th><th>HTP SO</th><th>CPU SO</th></tr></thead><tbody><tr><td><code>model.0.s1</code></td><td>23</td><td>23.230 ms</td><td>52.0%</td><td>1.69 CPU·s/s</td><td>yes</td><td>no</td></tr><tr><td><code>model.0.s32</code></td><td>1</td><td>24.425 ms</td><td>50.7%</td><td>1.82 CPU·s/s</td><td>yes</td><td>no</td></tr></tbody></table>
+<p class="note"><b>为什么 process CPU / wall 可以大于 1？</b>它是进程全部线程 CPU 时间的总和；多个 host/RPC/polling 线程可以并行。调用线程约占半个 CPU 核，与当前 <code>setRpcLatencyAndPolling()</code> 的低延迟轮询策略相符。这是图调用期间的 host 开销，不等价于某个 QNN node 改在 CPU 上计算。</p>
+<p>这些 wall time 来自启用审计、未控温控频的一次功能性运行，只用于界定 CPU 活动，不替代原 Optrace 或关闭审计后的性能基线。</p>
+</section>
+<section><h2>判定逻辑</h2><ol>
+<li>若图内算子被 QNN CPU backend 执行，进程必须具备对应 backend 实现；本次初始化及每次执行后均未发现 <code>libQnnCpu.so</code>。</li>
+<li>旧 Optrace 中 s1/s32 的可映射 QNN 节点执行域全部为 HTP，资源为 HMX/HVX/DMA/sync；没有 CPU execution resource。</li>
+<li>运行日志没有 graph execution failure 或 fallback 信息，模型成功完成 prefill/decode。</li>
+<li>因此当前证据支持“<b>没有图内 CPU fallback</b>”。CPU 时间只说明 CPU 在协助提交、轮询和同步，不能推翻前三项证据。</li>
+</ol>
+<p>严格边界：若未来把模型拆成一个 HTP graph 加一个显式 mllm CPU graph，后者不属于 QNN graph 内 fallback，需要在 dispatcher/应用级 trace 中单独统计。本报告没有把这种图外工作隐藏掉。</p></section>
+<section><h2>原始证据</h2><ul>
+<li><code>/home/daniuniu/llm_exp/results/qwen3_sm8750_v79_20260713/cpu_fallback_audit_20260724/qnn_cpu_fallback_audit.csv</code>：每个 graphExecute 的 wall/CPU/boottime/backend 状态。</li>
+<li><code>/home/daniuniu/llm_exp/results/qwen3_sm8750_v79_20260713/cpu_fallback_audit_20260724/qnn_cpu_fallback_audit_meta.txt</code>：QNN build 与初始化时共享库映射。</li>
+<li><code>/home/daniuniu/llm_exp/results/qwen3_sm8750_v79_20260713/cpu_fallback_audit_20260724/qnn_cpu_fallback_runtime.log</code>：本次真机完整日志。</li>
+<li><code>/home/daniuniu/llm_exp/results/qwen3_sm8750_v79_20260713/qwen3-sm8750-v79-s1-operators.csv</code>、<code>/home/daniuniu/llm_exp/results/qwen3_sm8750_v79_20260713/qwen3-sm8750-v79-s32-operators.csv</code>：旧 V79 Optrace 节点域。</li>
+</ul></section>
+</main></body></html>

@@ -40,6 +40,7 @@ class KVCacheManager {
   }
 
   void initCache(mllm::Allocator* allocator, int32_t ar_len);
+  void resetCache();
   void rearrangeCache(int32_t ar_len_dst);
 
   void initAttentionMask(uint16_t* attention_mask, const std::vector<int32_t>& attention_map, int32_t ar_len, int32_t n_past);

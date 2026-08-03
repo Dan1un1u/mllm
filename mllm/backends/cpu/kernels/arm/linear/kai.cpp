@@ -2,11 +2,9 @@
 // Licensed under the MIT License.
 
 #include <limits>
-#include <stdexcept>
 
 #include "mllm/core/Parallel.hpp"
 #include "mllm/backends/cpu/kernels/arm/linear/kai.hpp"
-#include "mllm/backends/cpu/kernels/common/kai_w4a32_pack.hpp"
 
 // for fp32
 #include "kai_matmul_clamp_f32_f32_f32p8x1biasf32_6x8x4_neon_mla.h"
@@ -38,22 +36,6 @@
 #include "mllm/utils/Common.hpp"
 
 namespace mllm::cpu::arm {
-namespace {
-
-std::string_view tileName(KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::Tiles tile) {
-  using Tiles = KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::Tiles;
-  switch (tile) {
-    case Tiles::qai8dxp1x8_qsi4c32p4x8_1x4x32: return "qai8dxp1x8_qsi4c32p4x8_1x4x32";
-    case Tiles::qai8dxp1x8_qsi4c32p8x8_1x8x32: return "qai8dxp1x8_qsi4c32p8x8_1x8x32";
-    case Tiles::qai8dxp4x8_qsi4c32p4x8_8x4x32: return "qai8dxp4x8_qsi4c32p4x8_8x4x32";
-    case Tiles::qai8dxp4x8_qsi4c32p4x8_16x4x32: return "qai8dxp4x8_qsi4c32p4x8_16x4x32";
-    case Tiles::qai8dxp4x8_qsi4c32p8x8_4x8x32: return "qai8dxp4x8_qsi4c32p8x8_4x8x32";
-    case Tiles::qai8dxp1x4_qsi4c32p4x4_1x4: return "qai8dxp1x4_qsi4c32p4x4_1x4";
-  }
-  throw std::invalid_argument("Unsupported KAI W4A32 tile configuration");
-}
-
-}  // namespace
 
 kai_matmul_clamp_f32_f32_f32p_ukernel KaiLinear_fp32_fp32_fp32p_mxk_kxn::ukernel_ = {
     .get_m_step = kai_get_m_step_matmul_clamp_f32_f32_f32p8x1biasf32_6x8x4_neon_mla,
@@ -364,14 +346,49 @@ size_t KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::workspace_size(int M, int K,
 
 size_t KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::quant_pack_rhs_size(int N, int K,
                                                                    KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::Tiles tile_cfg) {
-  return common::kaiW4A32PackedSize(N, K, tileName(tile_cfg));
+  const size_t nr = ukernels_[tile_cfg].get_nr();
+  const size_t kr = ukernels_[tile_cfg].get_kr();
+  const size_t sr = ukernels_[tile_cfg].get_sr();
+  return kai_get_rhs_packed_size_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(N, K, nr, kr, sr, 32, kai_dt_bf16);
 }
 
 void KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::quant_pack_rhs_offline(uint8_t* __restrict__ packed_weight,
                                                                     const float* __restrict__ rhs,
                                                                     const float* __restrict__ bias, int N, int K,
                                                                     KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::Tiles tile_cfg) {
-  common::kaiW4A32QuantizeAndPack(packed_weight, rhs, bias, N, K, tileName(tile_cfg));
+  // meta info
+  const size_t rhs_native_size_f32 = N * K * sizeof(float);
+  const size_t rhs_native_size_qs4c32 = N * get_rhs_native_stride(K);
+  const size_t rhs_scales_size_bf16 = N * get_rhs_scale_stride(K, 32);
+
+  const size_t nr = ukernels_[tile_cfg].get_nr();
+  const size_t kr = ukernels_[tile_cfg].get_kr();
+  const size_t sr = ukernels_[tile_cfg].get_sr();
+
+  uint8_t* rhs_qs4c32 = new uint8_t[rhs_native_size_qs4c32];
+  uint8_t* rhs_scales_bf16 = new uint8_t[rhs_scales_size_bf16];
+
+  // quant
+  quant_nxk_qs4c32_f32(N, K, 32, rhs, rhs_qs4c32, (uint16_t*)rhs_scales_bf16);
+
+  // pack
+  kai_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0_params params;
+  params.lhs_zero_point = 1;
+  params.rhs_zero_point = 8;
+  params.scale_dt = kai_dt_bf16;
+  kai_run_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(1, N, K,                       // Dimensions
+                                            nr, kr, sr,                    // Packing arguments
+                                            32,                            // Block length
+                                            (const uint8_t*)(rhs_qs4c32),  // RHS
+                                            get_rhs_native_stride(K),      // RHS stride
+                                            bias,                          // Bias
+                                            rhs_scales_bf16,               // Scale
+                                            get_rhs_scale_stride(K, 32),   // Scale stride
+                                            packed_weight,                 // RHS packed
+                                            0, &params);
+
+  delete[] rhs_qs4c32;
+  delete[] rhs_scales_bf16;
 }
 
 void KaiLinear_f32_qai8dxp_qsi4c32p_mxk_nxk::matmul(float* __restrict__ dst, const float* __restrict__ lhs_fp32,

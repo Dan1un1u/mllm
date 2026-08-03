@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qwen3-1.7B 在 Qualcomm SM8750 NPU 上的结构化与量化 Profiling</title>
+  <style>
+    :root {
+      --ink:#172033; --muted:#5f6b7a; --line:#d9e0e8; --paper:#fff;
+      --blue:#2367d1; --cyan:#0c8ba8; --green:#25855a; --amber:#c57b10;
+      --red:#b84242; --violet:#7354b3; --soft:#f3f6fa; --soft-blue:#edf4ff;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#e9eef4; color:var(--ink); font-family:Inter,"Noto Sans SC","Microsoft YaHei",system-ui,sans-serif; line-height:1.68; }
+    article { max-width:1180px; margin:28px auto; background:var(--paper); box-shadow:0 8px 34px #2d41591f; }
+    header { padding:62px 72px 48px; background:linear-gradient(135deg,#10213e,#17497b 66%,#15758a); color:#fff; }
+    header h1 { max-width:900px; margin:0 0 18px; font-size:38px; line-height:1.25; letter-spacing:.01em; }
+    header .subtitle { font-size:19px; color:#dceaff; }
+    header .meta { margin-top:30px; color:#bcd2eb; font-size:14px; }
+    main { padding:42px 72px 70px; }
+    h2 { margin:48px 0 18px; padding-bottom:9px; border-bottom:2px solid #dce5ef; font-size:27px; color:#173c67; }
+    h3 { margin:30px 0 10px; font-size:20px; color:#21527f; }
+    h4 { margin:22px 0 7px; font-size:16px; }
+    p { margin:10px 0; }
+    a { color:#145fbd; text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    code { padding:2px 5px; border-radius:4px; background:#edf1f5; font-family:"SFMono-Regular",Consolas,monospace; font-size:.92em; }
+    .lead { font-size:18px; color:#31445c; }
+    .callout { margin:22px 0; padding:17px 20px; border-left:5px solid var(--blue); background:var(--soft-blue); }
+    .callout strong { color:#164e99; }
+    .warning { border-color:var(--amber); background:#fff7e8; }
+    .warning strong { color:#8b5607; }
+    .finding { border-color:var(--green); background:#edf9f3; }
+    .finding strong { color:#176a44; }
+    .hypothesis { border-color:var(--violet); background:#f4f0fb; }
+    .hypothesis strong { color:#583896; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; margin:20px 0; }
+    .grid.three { grid-template-columns:repeat(3,minmax(0,1fr)); }
+    .card { padding:17px 19px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+    .card .kicker { color:var(--muted); font-size:13px; text-transform:uppercase; letter-spacing:.07em; }
+    .card .big { margin:3px 0; font-size:29px; font-weight:760; color:#174c82; }
+    .card .small { color:var(--muted); font-size:13px; }
+    .arch { display:grid; grid-template-columns:1fr 1.5fr 1fr; gap:15px; align-items:stretch; margin:24px 0; }
+    .arch .unit { padding:20px; border-radius:12px; text-align:center; border:1px solid #cdd9e6; }
+    .arch .hvx { background:#eaf8fb; border-color:#83c7d4; }
+    .arch .mem { background:#f7f3ff; border-color:#b6a4db; }
+    .arch .hmx { background:#edf7ef; border-color:#8bc39e; }
+    .arch .unit b { display:block; font-size:22px; }
+    .parallel { display:flex; justify-content:center; gap:9px; margin:10px 0 0; }
+    .parallel span { display:inline-block; width:34px; padding:5px 0; border-radius:6px; background:#c9edf3; font-weight:700; }
+    .flow { display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin:18px 0; }
+    .flow .step { padding:8px 11px; border-radius:7px; background:#eff4f9; border:1px solid #d5e0eb; font-size:13px; }
+    .flow .hot { background:#fff1e5; border-color:#e9b57f; color:#82480e; font-weight:700; }
+    .flow .quant { background:#f0ebfa; border-color:#baa6dc; color:#593c8d; font-weight:700; }
+    .flow .arrow { color:#8491a0; font-weight:700; }
+    .pipeline { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin:22px 0; }
+    .pipeline .step { position:relative; min-height:116px; padding:15px; border:1px solid var(--line); border-radius:9px; background:#fbfcfe; }
+    .pipeline .num { display:inline-grid; place-items:center; width:25px; height:25px; margin-bottom:7px; border-radius:50%; background:#1f66b4; color:#fff; font-weight:700; }
+    .pipeline b { display:block; }
+    .pipeline small { color:var(--muted); }
+    .table-wrap { overflow-x:auto; margin:18px 0 28px; }
+    table { width:100%; border-collapse:collapse; font-size:13.5px; }
+    th,td { padding:9px 10px; border:1px solid var(--line); vertical-align:top; }
+    th { background:#edf3f8; color:#25445f; text-align:left; white-space:nowrap; }
+    td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    tr.hot-row td { background:#fff9f1; }
+    .bar-row { display:grid; grid-template-columns:185px 1fr 62px; align-items:center; gap:10px; margin:7px 0; font-size:13px; }
+    .bar-track { height:16px; border-radius:99px; background:#e7edf3; overflow:hidden; }
+    .bar { height:100%; border-radius:99px; background:linear-gradient(90deg,#3978d4,#16a0b4); }
+    .bar.quant { background:linear-gradient(90deg,#7654b5,#bf62aa); }
+    .bar.hmx { background:linear-gradient(90deg,#1f8a59,#55b273); }
+    .compare { margin:21px 0; padding:18px 20px; border-radius:10px; background:#111f34; color:#e9f2fb; }
+    .compare .bars { display:grid; gap:11px; }
+    .compare .line { display:grid; grid-template-columns:150px 1fr 90px; gap:12px; align-items:center; }
+    .compare .track { height:20px; border-radius:5px; background:#263a55; overflow:hidden; }
+    .compare .fill { height:100%; background:#48a3dc; }
+    .compare .wall { background:#54bd83; }
+    .io { display:grid; grid-template-columns:1fr auto 1fr; gap:12px; align-items:center; margin:20px 0; }
+    .io .box { padding:16px; border:1px solid #cfd9e4; border-radius:9px; background:#f8fafc; }
+    .io .arr { font-size:26px; color:#66809b; }
+    .formula { padding:13px 17px; border-radius:8px; background:#f2f4f7; font-family:"SFMono-Regular",Consolas,monospace; overflow-x:auto; }
+    .roadmap { counter-reset:item; list-style:none; padding:0; }
+    .roadmap li { position:relative; margin:12px 0; padding:13px 16px 13px 52px; border:1px solid var(--line); border-radius:9px; }
+    .roadmap li:before { counter-increment:item; content:counter(item); position:absolute; left:15px; top:12px; width:25px; height:25px; display:grid; place-items:center; border-radius:50%; background:#245f9b; color:#fff; font-weight:700; }
+    .refs li { margin:8px 0; word-break:break-word; }
+    .footnote { color:var(--muted); font-size:12.5px; }
+    footer { padding:24px 72px 36px; border-top:1px solid var(--line); color:var(--muted); font-size:12.5px; }
+    @media(max-width:850px) {
+      article { margin:0; } header,main,footer { padding-left:24px; padding-right:24px; }
+      header h1 { font-size:29px; } .grid,.grid.three,.arch,.pipeline { grid-template-columns:1fr; }
+      .io { grid-template-columns:1fr; } .io .arr { transform:rotate(90deg); text-align:center; }
+    }
+    @media print {
+      @page { size:A4 portrait; margin:10mm; }
+      body { background:#fff; } article { margin:0; max-width:none; box-shadow:none; }
+      header { padding:38px 28px 30px; }
+      main { padding:24px 28px 42px; }
+      footer { padding:18px 28px 24px; }
+      header { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+      .grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .grid.three { grid-template-columns:repeat(3,minmax(0,1fr)); }
+      .arch { grid-template-columns:1fr 1.5fr 1fr; }
+      .pipeline { grid-template-columns:repeat(5,1fr); }
+      .io { grid-template-columns:1fr auto 1fr; }
+      .table-wrap { overflow:visible; }
+      table { font-size:9.2px; line-height:1.35; }
+      th,td { padding:5px 6px; }
+      th { white-space:normal; }
+      h2,h3 { break-after:avoid; }
+      table,.card,.callout,.compare,.arch,.pipeline,.flow,.io { break-inside:avoid; }
+    }
+  </style>
+</head>
+<body>
+<article>
+  <header>
+    <h1>Qwen3-1.7B 在 Qualcomm SM8750 NPU 上的结构化与量化 Profiling</h1>
+    <div class="subtitle">从异构并行、关键路径到 W4A4 直接执行的研究机会</div>
+    <div class="meta">平台：Snapdragon 8 Elite / SM8750 · HTP V79 · QAIRT 2.47 · 模型：Qwen3-1.7B LPBQ W4A16O16 G16 · 2026-07-14</div>
+  </header>
+
+  <main>
+    <section>
+      <h2>摘要</h2>
+      <p class="lead">本工作建立了一套面向 Qualcomm HTP 的结构化 profiling 方法：将 QNN Optrace、QHAS dominant path、HTP 资源标签、时间区间 union、内存计数器以及编译期 Quantization Manifest 对齐到 Qwen3 的实际网络结构。核心原则是：<strong>异构引擎上的累计 cycles 表示工作量，而非可直接相加的端到端延迟；性能判断必须回到依赖图上的关键路径。</strong></p>
+      <div class="grid three">
+        <div class="card"><div class="kicker">s32 / 32-token chunk</div><div class="big">22.069 ms</div><div class="small">QnnGraph_execute；HTP timeline 46.595M cycles</div></div>
+        <div class="card"><div class="kicker">s1 / single-token decode</div><div class="big">19.441 ms</div><div class="small">QnnGraph_execute；HTP timeline 41.049M cycles</div></div>
+        <div class="card"><div class="kicker">最关键发现</div><div class="big">16.7×</div><div class="small">LPBQ 权重展开 work / HMX MAC work</div></div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Graph</th><th>QHAS time</th><th>QnnGraph_execute</th><th>HTP timeline</th><th>Summed work</th><th>DRAM R / W</th><th>VTCM R / W</th><th>Peak VTCM</th></tr></thead>
+        <tbody>
+          <tr><td><b>s32</b></td><td class="num">22.639 ms</td><td class="num">22.069 ms</td><td class="num">46.595M cyc</td><td class="num">221.764M cyc</td><td class="num">1.049 GB / 11.56 MB</td><td class="num">9.891 GB / 11.693 GB</td><td class="num">6.54 MB</td></tr>
+          <tr><td><b>s1</b></td><td class="num">19.495 ms</td><td class="num">19.441 ms</td><td class="num">41.049M cyc</td><td class="num">197.389M cyc</td><td class="num">1.051 GB / 2.60 MB</td><td class="num">9.908 GB / 11.681 GB</td><td class="num">7.20 MB</td></tr>
+        </tbody>
+      </table></div>
+      <p class="footnote">QHAS/HTP cycles 来自 instrumented Optrace，适合做归因而非替代 profiling-off 重复计时；资源集合均为 1 HMX + 6 HVX。</p>
+      <div class="callout finding"><strong>结论先行：</strong>主要瓶颈不在 HMX 的矩阵乘本身，而在量化线性层之前的格式与精度准备——尤其是 HVX 上的 W4 block-weight 展开、权重 DMA/VTCM staging，以及 attention MatMul 的 signed conversion。MLP gate/up/down 与 LM head 因权重体量最大，占据约 64%–67% 的关键路径。</div>
+    </section>
+
+    <section>
+      <h2>1. SM8750 Hexagon NPU：并行的 HVX、HMX 与数据搬运</h2>
+      <p>SM8750（Snapdragon 8 Elite）的 Hexagon NPU 采用 fused AI accelerator 架构，公开规格列出 Scalar Accelerator、Tensor Accelerator、HVX、Micro Tile Inferencing 与 Hexagon Direct Link，并支持 INT4、INT8、INT16 与 FP16 精度 [1]。在本次 V79 Optrace 中，Tensor Accelerator 以 <strong>HMX</strong> 资源出现，向量侧以 <strong>6 条 HVX lane</strong> 出现。</p>
+
+      <div class="arch">
+        <div class="unit hvx"><b>HVX × 6</b><span>SIMD / reduction / elementwise<br>W4 展开、RMSNorm、RoPE、Softmax</span><div class="parallel"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span></div></div>
+        <div class="unit mem"><b>VTCM + DMA</b><span>片上 scratchpad / tile staging<br>DDR ↔ VTCM ↔ compute engines<br>checkpoint、wait、sync</span></div>
+        <div class="unit hmx"><b>HMX × 1</b><span>高吞吐矩阵乘累加<br>Q/K/V/O、MLP、LM head、attention MatMul</span></div>
+      </div>
+
+      <p>HVX 是宽 SIMD 向量执行单元；Qualcomm 的 HVX 编程手册明确说明多个 hardware thread/vector context 可并行执行 [2]。更重要的是，本次 trace 直接观测到 HMX、6 条 HVX、DMA 与同步事件在时间轴上重叠，跨 Q projection 的量化子事件最大并行度达到 7。因此，下面的关系是 profiling 的出发点：</p>
+      <div class="formula">Σ(event cycles across HMX/HVX/DMA)  ≠  graph latency</div>
+      <div class="callout warning"><strong>不要简单累加 cycles：</strong>同一时刻可能有多个 HVX kernel、HMX MAC 与 DMA 同时工作。累计 cycles 可用于衡量资源工作量和优化价值，但只有 wall/timeline、interval union 与 dependency critical path 才能回答延迟问题。</div>
+    </section>
+
+    <section>
+      <h2>2. 为什么必须找关键路径</h2>
+      <div class="compare">
+        <div style="font-weight:700;margin-bottom:13px">累计工作量与真实 HTP 时间窗口</div>
+        <div class="bars">
+          <div class="line"><span>s32 summed work</span><div class="track"><div class="fill" style="width:100%"></div></div><b>221.8M</b></div>
+          <div class="line"><span>s32 HTP wall</span><div class="track"><div class="fill wall" style="width:21.0%"></div></div><b>46.6M</b></div>
+          <div class="line"><span>s1 summed work</span><div class="track"><div class="fill" style="width:89.0%"></div></div><b>197.4M</b></div>
+          <div class="line"><span>s1 HTP wall</span><div class="track"><div class="fill wall" style="width:18.5%"></div></div><b>41.0M</b></div>
+        </div>
+      </div>
+      <p>s32 中所有 HTP event 的累计工作量为 221.8M cycles，但 HTP timeline 只有 46.6M cycles，二者相差 4.76×；s1 的对应差距为 4.81×。如果直接把每个 operator 或每个 engine 的 cycles 相加，会把并行重叠错误地计为串行延迟。</p>
+
+      <h3>四种指标回答四个不同问题</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>指标</th><th>定义</th><th>可回答的问题</th><th>不能回答的问题</th></tr></thead>
+        <tbody>
+          <tr><td><b>Timeline work cycles</b></td><td>各 event duration 的累加</td><td>哪个模块消耗了最多引擎工作量？</td><td>不能直接视为延迟</td></tr>
+          <tr><td><b>Active interval union</b></td><td>合并同一分组内重叠时间区间</td><td>该分组至少占据了多大的活动窗口？</td><td>不同表行之间仍可能重叠</td></tr>
+          <tr><td><b>HTP wall/timeline</b></td><td>整图起止时间窗口</td><td>HTP 图实际持续多久？</td><td>不能单独定位责任节点</td></tr>
+          <tr><td><b>Dominant Path HTP0</b></td><td>依赖关系与资源串行约束形成的关键链</td><td>哪些事件直接处在延迟关键路径上？</td><td>不是删除该事件后的反事实加速量</td></tr>
+        </tbody>
+      </table></div>
+      <p>QHAS 给出 HTP0 的 dominant path 归因；我们将其中的 direct/partial contribution 映射回 QNN node，再按 Qwen3 stage 聚合。<code>partial</code> 表示一个 event 只有部分区间位于关键链上，不是独立硬件，也不是 CPU fallback。</p>
+    </section>
+
+    <section>
+      <h2>3. Profiling 环境与方法流程</h2>
+      <div class="table-wrap"><table>
+        <tbody>
+          <tr><th>设备</th><td>OP5D0DL1 / PJZ110，Qualcomm SM8750（Snapdragon 8 Elite）</td></tr>
+          <tr><th>HTP context</th><td>原生 V79 / SM8750 context；<code>dspArch=79</code>，<code>socModel=69</code>，VTCM 8 MiB</td></tr>
+          <tr><th>软件栈</th><td>QAIRT / QNN 2.47.0，backend build <code>v2.47.0.260601114230</code></td></tr>
+          <tr><th>模型</th><td>Qwen3-1.7B，SHA per-head lowering，LPBQ W4A16O16，group size 16</td></tr>
+          <tr><th>图</th><td><code>model.0.s32</code>：32-token chunk；<code>model.0.s1</code>：single-token decode；context length 1024</td></tr>
+          <tr><th>采集</th><td>QNN HTP Optrace，按图过滤，warmup 0，单次 capture，graph execution serialized</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="pipeline">
+        <div class="step"><span class="num">1</span><b>AOT finalize</b><small>原生 V79 graph；保留 schematic；输出 Quantization Manifest</small></div>
+        <div class="step"><span class="num">2</span><b>设备执行</b><small>QNN Graph Execute；采集 Optrace payload、macro/detail profile</small></div>
+        <div class="step"><span class="num">3</span><b>官方解码</b><small>qnn-profile-viewer + HTP Optrace reader → Chrome Trace、HTP graph、QHAS</small></div>
+        <div class="step"><span class="num">4</span><b>关键路径对齐</b><small>QNN node ↔ HTP event ↔ HMX/HVX/DMA；deduplicate；interval union</small></div>
+        <div class="step"><span class="num">5</span><b>结构与量化视图</b><small>按 Qwen3 DAG、layer/head、logical/QNN/physical dtype 重新聚合</small></div>
+      </div>
+
+      <h3>关键路径是如何得到的？</h3>
+      <ol>
+        <li>使用 schematic 将 runtime resource ID 还原为 QNN node 与 HTP kernel。</li>
+        <li>读取每个 HTP event 的时间戳、duration、依赖输入、resource lane 与 dominant-path contribution。</li>
+        <li>由官方 QHAS 的 Dominant Path HTP0 得到依赖/资源约束下的关键链；再把 direct contribution 聚合到 Qwen3 stage。</li>
+        <li>同时对原始 Chrome Trace 做时间区间 union，检查同类 kernel 内部以及 HMX/HVX/DMA 之间的重叠。</li>
+        <li>用 Quantization Manifest 补充 pre-finalize QNN tensor 的 logical dtype、carrier dtype、scale/zero-point 与 blockwise encoding；用 Optrace 补充 post-lowering physical I/O dtype。</li>
+      </ol>
+
+      <div class="callout"><strong>执行位置边界：</strong>出现在本报告 Optrace/QHAS 中的节点位于 HTP graph 内，trace 中没有 CPU execution resource，也没有 graph fallback 错误。但 HTP Optrace 不能证明 <code>QnnGraph_execute</code> 之外不存在 CPU 工作；tokenization、sampling、RPC/runtime 和 tensor setup 需要 Android Perfetto/CPU trace 补充。</div>
+    </section>
+
+    <section>
+      <h2>4. 沿 Qwen3 结构理解瓶颈</h2>
+      <div class="flow">
+        <span class="step">Embedding</span><span class="arrow">→</span>
+        <span class="step">Input RMSNorm</span><span class="arrow">→</span>
+        <span class="step quant">Q/K/V Proj</span><span class="arrow">→</span>
+        <span class="step">Q/K Norm</span><span class="arrow">→</span>
+        <span class="step">RoPE</span><span class="arrow">→</span>
+        <span class="step">KV Cache</span><span class="arrow">→</span>
+        <span class="step">QKᵀ</span><span class="arrow">→</span>
+        <span class="step">Scale/Mask/Softmax</span><span class="arrow">→</span>
+        <span class="step">Attn×V</span><span class="arrow">→</span>
+        <span class="step quant">O Proj</span><span class="arrow">→</span>
+        <span class="step">Residual + RMSNorm</span><span class="arrow">→</span>
+        <span class="step hot">MLP Gate/Up/Down</span><span class="arrow">→</span>
+        <span class="step hot">LM Head</span>
+      </div>
+
+      <h3>4.1 关键路径热点：权重密集型 projection 主导</h3>
+      <div class="grid">
+        <div class="card">
+          <div class="kicker">s1 critical path composition</div>
+          <div class="bar-row"><span>MLP down</span><div class="bar-track"><div class="bar" style="width:100%"></div></div><b>17.3%</b></div>
+          <div class="bar-row"><span>LM head</span><div class="bar-track"><div class="bar" style="width:98.6%"></div></div><b>17.0%</b></div>
+          <div class="bar-row"><span>MLP up</span><div class="bar-track"><div class="bar" style="width:95.0%"></div></div><b>16.4%</b></div>
+          <div class="bar-row"><span>MLP gate</span><div class="bar-track"><div class="bar" style="width:93.1%"></div></div><b>16.1%</b></div>
+          <div class="bar-row"><span>O projection</span><div class="bar-track"><div class="bar" style="width:36.1%"></div></div><b>6.2%</b></div>
+          <div class="bar-row"><span>Q projection</span><div class="bar-track"><div class="bar" style="width:31.2%"></div></div><b>5.4%</b></div>
+        </div>
+        <div class="card">
+          <div class="kicker">s32 critical path composition</div>
+          <div class="bar-row"><span>MLP gate</span><div class="bar-track"><div class="bar" style="width:100%"></div></div><b>18.0%</b></div>
+          <div class="bar-row"><span>MLP up</span><div class="bar-track"><div class="bar" style="width:94.8%"></div></div><b>17.1%</b></div>
+          <div class="bar-row"><span>LM head</span><div class="bar-track"><div class="bar" style="width:81.2%"></div></div><b>14.6%</b></div>
+          <div class="bar-row"><span>MLP down</span><div class="bar-track"><div class="bar" style="width:78.2%"></div></div><b>14.1%</b></div>
+          <div class="bar-row"><span>Q projection</span><div class="bar-track"><div class="bar" style="width:31.0%"></div></div><b>5.6%</b></div>
+          <div class="bar-row"><span>O projection</span><div class="bar-track"><div class="bar" style="width:23.8%"></div></div><b>4.3%</b></div>
+        </div>
+      </div>
+      <p>MLP gate/up/down 与 LM head 合计占 s1 关键路径约 <strong>66.8%</strong>，占 s32 约 <strong>63.8%</strong>。这些 stage 都使用 LPBQ 权重并同时涉及 DMA、HVX 和 HMX。它们既是参数量最大的模块，也是格式转换、权重流式搬运与矩阵乘最密集的模块。</p>
+
+      <h3>4.2 Attention：计算并非唯一问题，格式与片上数据流同样重要</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Attention stage</th><th>s1 critical path</th><th>资源</th><th>观察</th></tr></thead>
+        <tbody>
+          <tr><td>Q/K/V projection</td><td class="num">12.3%</td><td>DMA + HVX + HMX</td><td>LPBQ 权重展开和 staging 主导，Q projection 因 16 个 query head 高于 K/V</td></tr>
+          <tr><td>QKᵀ similarity</td><td class="num">4.0%</td><td>HVX + HMX</td><td>无 DRAM 计数但 VTCM 约 221 MB；包含 QInt8 signed conversion</td></tr>
+          <tr><td>Scale/mask/Softmax</td><td class="num">0.8%</td><td>HVX</td><td>reduction/elementwise；主要是 VTCM 流量，不是当前首要瓶颈</td></tr>
+          <tr><td>Attention × V</td><td class="num">3.3%</td><td>DMA + HVX + HMX</td><td>signed conversion work 明显；active union 接近 work，串行性较高</td></tr>
+          <tr><td>KV cache convert/update</td><td class="num">2.7%</td><td>DMA + HVX</td><td>UInt8 KV cache 减少容量，但仍有 Convert/CastType 与约 58.7 MB DRAM traffic</td></tr>
+        </tbody>
+      </table></div>
+      <p>QKᵀ 和 Softmax 的 DRAM 计数为零并不意味着“没有内存开销”；它们主要使用 VTCM。VTCM 是 HTP 的片上 tightly coupled scratchpad，tile 和中间结果会反复读写，因此 VTCM traffic 可显著大于 DRAM traffic。整体 s1 的 DRAM read/write 约为 1.051 GB / 2.60 MB，而 VTCM read/write 约为 9.908 GB / 11.681 GB。</p>
+      <div class="callout warning"><strong>关于 memory-bound：</strong>这些数据支持“projection 是权重流/格式转换主导，attention reduction 是片上 VTCM 数据流主导”的判断，但还不是完整 roofline 证明。严格区分 compute-bound 与 memory-bound 仍需受控频率下的有效带宽、MAC 吞吐与 stall counter。</div>
+
+      <h3>4.3 RMSNorm、RoPE 与 elementwise</h3>
+      <p>RMSNorm、RoPE、residual、SiLU/product 主要落在 HVX。单个 stage 的关键路径占比不高，但它们决定了 activation 的量化边界，并影响能否在层间持续保持低比特表示。若未来 W4A4 只覆盖 projection、却在每个 RMSNorm/RoPE/residual 边界反复升降精度，转换开销仍会重新出现。</p>
+    </section>
+
+    <section>
+      <h2>5. 量化视角：W4A16 的真正代价在哪里</h2>
+      <p>编译期 Manifest 与 runtime Optrace 揭示了两个不同层次的数据类型：</p>
+      <div class="io">
+        <div class="box"><b>逻辑 / pre-finalize QNN</b><br>activation：UInt16 / UFIXED_POINT_16<br>weight：Int4，LPBQ block size 16<br>carrier：SFIXED_POINT_8 + blockwise expansion</div>
+        <div class="arr">→</div>
+        <div class="box"><b>post-lowering HTP</b><br>HVX：W4 block scale → physical QInt8<br>DMA：QInt8/QUInt8 staging to VTCM<br>常见 HMX 路径：QInt8 weight + QUInt16 activation → QUInt16 output</div>
+      </div>
+      <p><code>Conv2d_w_blk_exp_scale</code> 不是图像卷积，也不是 CPU fallback；它是 QNN 对 LPBQ quantized linear 的 lowered 表达。每个 graph 有 1,009 个 LPBQ weight tensor。V79 在 HVX 上将逻辑 W4 block-scaled weight 展开为 per-channel QInt8，然后交给 HMX MAC。</p>
+
+      <h3>5.1 量化 kernel 分解</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Runtime phase</th><th>s32 work</th><th>s32 direct dominant</th><th>s1 work</th><th>s1 direct dominant</th><th>主要资源</th></tr></thead>
+        <tbody>
+          <tr class="hot-row"><td><b>LPBQ W4 expand/dequant</b></td><td class="num">142.383M</td><td class="num">15.944M</td><td class="num">140.170M</td><td class="num">14.039M</td><td>HVX × 6</td></tr>
+          <tr><td>LPBQ weight DMA/wait</td><td class="num">24.444M</td><td class="num">8.643M</td><td class="num">20.530M</td><td class="num">7.548M</td><td>DMA / wait / VTCM</td></tr>
+          <tr><td>LPBQ HMX MAC</td><td class="num">8.542M</td><td class="num">8.542M</td><td class="num">8.372M</td><td class="num">8.372M</td><td>HMX</td></tr>
+          <tr><td>Attention MatMul signed conversion</td><td class="num">7.380M</td><td class="num">1.292M</td><td class="num">7.395M</td><td class="num">1.734M</td><td>HVX</td></tr>
+          <tr><td>LPBQ bias DMA/wait</td><td class="num">3.752M</td><td class="num">0.895M</td><td class="num">3.579M</td><td class="num">0.884M</td><td>DMA / wait</td></tr>
+          <tr><td>Explicit + fused requant</td><td class="num">1.410M</td><td class="num">0.355M</td><td class="num">0.988M</td><td class="num">0.218M</td><td>HVX / sync</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="grid">
+        <div class="card"><div class="kicker">s32 visible conversion/requant</div><div class="big">151.2M work</div><div class="small">68.2% of graph work；17.59M direct dominant，37.8% of HTP timeline</div></div>
+        <div class="card"><div class="kicker">s1 visible conversion/requant</div><div class="big">148.6M work</div><div class="small">75.3% of graph work；15.99M direct dominant，39.0% of HTP timeline</div></div>
+      </div>
+      <p>最醒目的现象是：W4 展开 work 是 HMX MAC work 的 <strong>16.7×</strong>。由于六条 HVX 并行，它不等于 16.7× 的延迟；但 W4 展开本身仍贡献了约 34.2% 的 HTP dominant timeline。换言之，当前 W4A16 路径通过节省权重存储换取了显著的 runtime unpack/dequant、staging 与格式转换成本。</p>
+
+      <h3>5.2 W4A4：从“低比特存储”走向“低比特直接执行”</h3>
+      <div class="callout hypothesis"><strong>研究假设：</strong>结合已有“利用 8-bit HMX 数据通路实现 Int4 乘法”的研究，如果能够让 activation 与 weight 以 W4A4 packed form 跨层保存，并在 HMX 路径直接完成等价 Int4 MAC，就可能同时减少 W4→QInt8 展开、A16 搬运、VTCM footprint 以及部分 signed/requant conversion。真正的目标不是只把模型文件压到 4 bit，而是避免执行前后反复恢复为 8/16 bit。</div>
+
+      <h4>基于关键路径的乐观上界</h4>
+      <div class="formula">Speedup_upper = 1 / (1 - removable_critical_fraction)</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>假设</th><th>可移除关键路径比例</th><th>Amdahl 乐观上界</th><th>解释</th></tr></thead>
+        <tbody>
+          <tr><td>仅消除 W4 → QInt8 expand/dequant</td><td class="num">约 34.2%</td><td class="num"><b>约 1.52×</b></td><td>两张图几乎一致；最直接、最可信的量化 kernel 目标</td></tr>
+          <tr><td>消除全部可见 conversion/requant chain</td><td class="num">37.8%–39.0%</td><td class="num"><b>1.61×–1.64×</b></td><td>包括 signed conversion 与 requant；更激进且不一定全部可消除</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout warning"><strong>这不是预测加速比：</strong>Amdahl 上界假设被移除工作没有替代成本、其他路径不变。真实 W4A4 仍需要 scale/zero-point、Int32 accumulation、某种 output requant，并面临 RMSNorm、Softmax、RoPE、residual 的精度边界与 accuracy trade-off。新的 packed kernel 还可能降低 HMX utilization。因此必须通过 counterfactual graph 实测验证。</div>
+    </section>
+
+    <section>
+      <h2>6. 总结与后续研究方向</h2>
+      <h3>总体结论</h3>
+      <ol>
+        <li><strong>HTP 是并行异构流水线。</strong>HMX、6 条 HVX、DMA 与同步同时活动，累计 work cycles 远高于 wall cycles。</li>
+        <li><strong>性能归因必须基于关键路径。</strong>work cycles 用于排序资源消耗，dominant path 用于定位直接延迟贡献，interval union 用于校验重叠。</li>
+        <li><strong>Qwen3 的关键路径由权重密集 projection 主导。</strong>MLP 与 LM head 占约三分之二，Q/K/V/O projection 次之。</li>
+        <li><strong>当前量化瓶颈是“转换与数据流”，不是 HMX MAC 本身。</strong>W4 block expansion、DMA/VTCM staging 和 signed conversion 的工作量及关键路径贡献均显著。</li>
+        <li><strong>W4A4 的研究价值在于直接执行。</strong>如果低比特表示能跨 operator 保持并直接进入 HMX，潜在收益不仅来自容量下降，更来自消除中间格式恢复。</li>
+      </ol>
+
+      <h3>建议的研究路线</h3>
+      <ol class="roadmap">
+        <li><b>实现 direct W4A4 HMX kernel。</b>利用现有 8-bit HMX Int4 乘法机制，明确 packed layout、cross-term correction、accumulator 与 requant 方案。</li>
+        <li><b>让低比特 activation 跨 operator 存活。</b>优先覆盖 MLP gate/up/down、Q/K/V/O 与 LM head；避免每层进入 projection 前重新量化。</li>
+        <li><b>消除 W4 runtime expansion。</b>比较 direct packed consumption、离线预展开/预排布和按 tile cache 三条路线；量化 DRAM、VTCM 与启动成本。</li>
+        <li><b>优化 HMX/HVX/DMA 调度。</b>采用 double buffering、tile prefetch 与更长的 producer-consumer pipeline，使剩余转换隐藏在 HMX MAC 后方。</li>
+        <li><b>处理 attention 特有转换。</b>重点减少 QKᵀ/Attn×V 的 <code>convert_weights_to_signed.shuffled</code>，并评估 A4 KV cache 或混合精度 cache。</li>
+        <li><b>建立准确率—延迟—能耗联合评估。</b>在相同模型、频率、温度和 batch/sequence 条件下比较 W4A16、W4A8、W4A4；profile-off 重复计时，Optrace 只用于归因。</li>
+        <li><b>补齐系统边界。</b>用 Perfetto/FastRPC markers 测量 QnnGraph_execute 之外的 CPU/RPC/tensor setup，从 graph-level 扩展到 token-level end-to-end。</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>7. 可信度、限制与可复现材料</h2>
+      <ul>
+        <li>本报告基于一次 graph-filtered Optrace sample。Optrace 会扰动执行；性能结论需用 profiling off、多次 warmup/repetition 与受控频率验证。</li>
+        <li>原生 V79 context 已确认改变 lowering/scheduling；本报告不再使用 SM8650/V75 compatibility context。</li>
+        <li>schematic 是由相同 V79 graph definition 重新 finalize 生成并成功无 unknown-resource 解码；严格 bit-for-bit provenance 的后续实验应把 context 与同一次 finalize 的 schematic 一起归档。</li>
+        <li>dominant-path contribution 是直接归因，不是删除 operator 后的反事实收益；W4A4 上界必须通过实际新图验证。</li>
+      </ul>
+
+      <h3>结果文件</h3>
+      <ul>
+        <li><a href="qwen3-sm8750-v79-s32-qwen3-structure.html">s32 Qwen3 structure report</a>；<a href="qwen3-sm8750-v79-s1-qwen3-structure.html">s1 Qwen3 structure report</a></li>
+        <li><a href="qwen3-sm8750-v79-s32-quantization.html">s32 quantization report</a>；<a href="qwen3-sm8750-v79-s1-quantization.html">s1 quantization report</a></li>
+        <li><a href="model.0.s32_quant_manifest.json">s32 Quantization Manifest</a>；<a href="model.0.s1_quant_manifest.json">s1 Quantization Manifest</a></li>
+        <li><a href="qwen3-sm8750-v79-s32-chrometrace_qnn_htp_analysis_summary.html">s32 official QHAS</a>；<a href="qwen3-sm8750-v79-s1-chrometrace_qnn_htp_analysis_summary.html">s1 official QHAS</a></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>参考资料</h2>
+      <ol class="refs">
+        <li>Qualcomm, <a href="https://www.qualcomm.com/smartphones/products/8-series/snapdragon-8-elite-mobile-platform">Snapdragon 8 Elite Mobile Platform</a>. 官方规格列出 Hexagon Scalar/Tensor Accelerator、HVX、Fused AI Accelerator，以及 INT4/INT8/INT16/FP16 支持。</li>
+        <li>Qualcomm, <a href="https://docs.qualcomm.com/bundle/publicresource/80-N2040-44.pdf">Hexagon V66 HVX Programmer’s Reference Manual</a>. 用于解释 HVX SIMD、vector context 与 hardware-thread parallelism；SM8750 的实际资源数量以本次 V79 Optrace 为准。</li>
+        <li>Qualcomm, <a href="https://docs.qualcomm.com/bundle/publicresource/topics/80-63442-4/developing-apps-qualcomm-neural-processing-sdk.html?product=1601111740010412">Qualcomm Neural Processing SDK / QAIRT Documentation</a>. QNN HTP、Linting Profile、QHAS Profiling 与 INT4 encodings 文档入口。</li>
+        <li>Qualcomm, <a href="https://www.qualcomm.com/internet-of-things/products/q8-series/qcs8550">QCS8550 Hexagon Tensor Processor public architecture description</a>. 用于说明公开 Qualcomm HTP 术语中 HVX 与 HMX 的分工；其单元数量和支持格式不作为 SM8750 规格引用。</li>
+      </ol>
+      <p class="footnote">所有 SM8750 数字、资源数量、Qwen3 stage 归因、量化开销与 Amdahl 计算均来自本项目归档的 V79 Optrace/QHAS/Manifest，而非上述公开产品的宣传性能数据。</p>
+    </section>
+  </main>
+  <footer>Qwen3-1.7B × Qualcomm SM8750 HTP V79 · Structured & Quantization-aware Hardware Profiling · Internal academic presentation draft</footer>
+</article>
+</body>
+</html>

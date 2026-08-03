@@ -29,6 +29,7 @@ class Runner {
   }
 
   bool load();
+  void reset();
   void generate(const Tensor& prompt_tokens, int32_t seq_len, const std::function<void(const std::string&)>& token_callback,
                 bool perf = false);
 

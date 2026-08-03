@@ -51,6 +51,8 @@ class QnnAOTNodeTensor : public std::enable_shared_from_this<QnnAOTNodeTensor> {
   explicit QnnAOTNodeTensor(const ir::tensor::TensorValue::ptr_t& v, bool force_static_weight = false);
 
   std::shared_ptr<mllm::qnn::QNNTensorWrapper> getWrapper() { return tensor_wrapper_; }
+  [[nodiscard]] const std::string& getIRStorageDtype() const { return ir_storage_dtype_; }
+  [[nodiscard]] const std::string& getQuantRecipeJson() const { return quant_recipe_json_; }
 
  private:
   Qnn_TensorType_t parseQnnTensorTypeFromIR(const ir::tensor::TensorValue::ptr_t& v);
@@ -65,6 +67,8 @@ class QnnAOTNodeTensor : public std::enable_shared_from_this<QnnAOTNodeTensor> {
   void setupComplexTensorQuantization(const ir::tensor::TensorValue::ptr_t& v);
 
   std::shared_ptr<mllm::qnn::QNNTensorWrapper> tensor_wrapper_;
+  std::string ir_storage_dtype_;
+  std::string quant_recipe_json_;
 };
 
 class QnnAOTNodeOperation : public std::enable_shared_from_this<QnnAOTNodeOperation> {
@@ -116,7 +120,7 @@ class QnnAOTGraph : public std::enable_shared_from_this<QnnAOTGraph> {
   using ptr_t = std::shared_ptr<QnnAOTGraph>;
 
   QnnAOTGraph(QNN_INTERFACE_VER_TYPE& qnnInterface, Qnn_BackendHandle_t backendHandle, Qnn_ContextHandle_t contextHandle,
-              const std::string& graphName);
+              Qnn_ProfileHandle_t profileHandle, const std::string& graphName);
 
   void addOperation(const QnnAOTNodeOperation::ptr_t& qnn_op);
 
@@ -129,6 +133,12 @@ class QnnAOTGraph : public std::enable_shared_from_this<QnnAOTGraph> {
   std::unordered_map<std::string, QnnAOTNodeTensor::ptr_t> all_tensors_;
 
  private:
+  void dumpQuantizationManifest();
+  void dumpOptraceArtifacts();
+
+  QNN_INTERFACE_VER_TYPE* qnn_interface_ = nullptr;
+  Qnn_ProfileHandle_t profile_handle_ = nullptr;
+  std::string graph_name_;
   std::shared_ptr<mllm::qnn::QNNModel> qnn_model_;
   std::vector<QnnGraph_Config_t> qnn_graph_configs;
   std::vector<QnnGraph_CustomConfig_t> htp_graph_configs;
@@ -146,6 +156,7 @@ struct QnnDeviceAndContext {
   QnnContext_Config_t** qnn_context_config_ = nullptr;
   Qnn_ProfileHandle_t profile_bk_handle_ = nullptr;
   Qnn_ContextHandle_t qnn_ctx_handle_;
+  bool optrace_enabled_ = false;
 
   std::unordered_map<std::string, QnnAOTGraph::ptr_t> graphs_;              //< for persistence keep graphs.
   std::unordered_map<std::string, QnnAOTNodeTensor::ptr_t> static_tensor_;  //< for weight sharing.

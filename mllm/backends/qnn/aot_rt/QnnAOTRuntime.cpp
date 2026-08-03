@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cstring>
 #include <chrono>
+#include <cstdlib>
+#include <fstream>
 
 #include "mllm/backends/qnn/aot_rt/QnnAOTRuntime.hpp"
 #include "mllm/core/DataTypes.hpp"
@@ -15,6 +17,31 @@
 #include <fmt/color.h>
 
 namespace mllm::qnn::aot {
+namespace {
+
+void appendRunnerPerformanceCsv(int64_t prefillTokens, int64_t prefillDurationUs,
+                                int64_t decodeTokens, int64_t decodeDurationUs) {
+  const char* profileDir = std::getenv("MLLM_QNN_PROFILE_DIR");
+  const std::string path = std::string(profileDir ? profileDir : "/data/local/tmp") + "/qnn_runner_e2e.csv";
+  bool writeHeader = true;
+  {
+    std::ifstream existing(path, std::ios::binary | std::ios::ate);
+    writeHeader = !existing.is_open() || existing.tellg() <= 0;
+  }
+  std::ofstream stream(path, std::ios::app);
+  if (!stream.is_open()) { return; }
+  if (writeHeader) { stream << "phase,tokens,duration_us,tokens_per_second\n"; }
+  const auto writeRow = [&](const char* phase, int64_t tokens, int64_t durationUs) {
+    const double tokensPerSecond =
+        durationUs > 0 ? static_cast<double>(tokens) * 1000000.0 / static_cast<double>(durationUs) : 0.0;
+    stream << phase << ',' << tokens << ',' << durationUs << ',' << tokensPerSecond << '\n';
+  };
+  writeRow("prefill_e2e", prefillTokens, prefillDurationUs);
+  writeRow("decode_e2e_after_first", decodeTokens, decodeDurationUs);
+}
+
+}  // namespace
+
 Runner::Runner(const RunnerConfig& config, mllm::preprocessor::AutoTokenizer* tokenizer)
     : config_(config), tokenizer_(tokenizer) {}
 
@@ -58,6 +85,11 @@ bool Runner::load() {
   return true;
 }
 
+void Runner::reset() {
+  MLLM_RT_ASSERT(kv_manager_ != nullptr);
+  kv_manager_->resetCache();
+}
+
 void Runner::generate(const Tensor& prompt_tokens, int32_t seq_len,
                       const std::function<void(const std::string&)>& token_callback, bool perf) {
   MLLM_RT_ASSERT(prompt_tokens.rank() == 2 && prompt_tokens.dtype() == kInt64);
@@ -77,13 +109,14 @@ void Runner::generate(const Tensor& prompt_tokens, int32_t seq_len,
   int64_t next_token = prompt_processor_->prefill(prompt_tokens_i64, start_pos);
   prompt_tokens_i64.push_back(next_token);
 
-  if (perf) { prefill_end = std::chrono::high_resolution_clock::now(); }
-
   if (token_callback) {
     std::wstring wstr = tokenizer_->detokenize(next_token);
     std::string str = mllm::preprocessor::wideString2Utf8String(wstr);
     token_callback(str);
   }
+  // Keep the phase boundary symmetric with decode: both timings include the
+  // token callback/detokenization performed by their respective phase.
+  if (perf) { prefill_end = std::chrono::high_resolution_clock::now(); }
 
   int64_t cur_pos = prompt_tokens.size(-1);
 
@@ -107,6 +140,8 @@ void Runner::generate(const Tensor& prompt_tokens, int32_t seq_len,
     if (prefill_duration > 0) { prefill_tps = (double)prefill_token_count / (prefill_duration / 1000000.0); }
 
     if (decode_duration > 0 && generated_count > 0) { decode_tps = (double)generated_count / (decode_duration / 1000000.0); }
+
+    appendRunnerPerformanceCsv(prefill_token_count, prefill_duration, generated_count, decode_duration);
 
     // Print performance summary
     fmt::print(fg(fmt::color::cyan), "\n{:=^50}\n", " Performance Summary ");
