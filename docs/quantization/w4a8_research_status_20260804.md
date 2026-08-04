@@ -7,6 +7,65 @@ SM8750/V79 上的 G32 LPBQ 权重与静态 A8 activation 研究。原始模型�
 `D:\llm_exp\models\Qwen3-origin`。GPU 训练在 WSL，QNN AOT、Android 构建和
 ADB 真机验证回到 Linux VMware VM。
 
+## 增强训练更新（本节结果覆盖下方旧的 100-step 基线表）
+
+最新提交为 `7c07c935`。在不引入 rotation 的前提下，P1 trainer 已升级为
+部署闭环的两阶段 curriculum，并在 WSL RTX 5070 Ti 12 GB 上完成 28 层全模型
+训练：
+
+- Stage 1：W4A16，仅学习 LPBQ G32 `scale1/scale2`，200 steps，`lr=0.003`；
+- Stage 2：联合学习静态 A8 input scale/clipping 与 LPBQ scale，400 steps，
+  `lr=0.005`；
+- 两阶段使用 30-step warmup、cosine decay、gradient clip 1.0；
+- 每 50 steps 将 `scale1` 舍入为真实 UInt4 carrier，重建 decoded LPBQ weight，
+  用固定整数 zero-point 做部署态 round-trip loss 选择；
+- prefix 目标、逐层冻结前缀、无 28 层 autograd 图；两套全模型均无 OOM。
+
+总计 196 个 Linear input tensor（28 层 × 7 projection）的 held-out 软件 oracle：
+
+| variant | A16 Linear inputs | logits cosine | top-1 agreement | logits NMSE | block NMSE |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| W4A16 reference | 196/196 | 0.916866 | 1.000000 | 0.159378 | 0.016657 |
+| 旧 prefix mixed | 46/196 | 0.895313 | 0.833333 | 0.207467 | 0.006163 |
+| 旧 prefix all-risk | 62/196 | 0.889310 | 1.000000 | 0.221470 | 0.005967 |
+| **增强 prefix mixed** | **46/196** | **0.903255** | **0.833333** | **0.204042** | **0.005287** |
+| **增强 prefix all-risk** | **62/196** | **0.918487** | **1.000000** | **0.169250** | **0.005310** |
+
+增强 all-risk 比旧 all-risk 提升 `+0.029177` cosine，并保持与 W4A16 相同的
+held-out top-1；这是目前的 software provisional GO 候选。增强 mixed 提升
+`+0.007942` cosine，但 top-1 仍为 `83.3%`。`0.918487` 仍是 PyTorch
+fake-quant oracle 数字，不能直接写成 native QNN W4A8 精度。
+
+本次 VM 构建必须使用以下新产物，而不是旧 teacher/smoke 目录：
+
+- `artifacts/p1/streaming-full-robust-prefix-mapzp/`（46/196-A16 mixed）；
+- `artifacts/p1/streaming-full-robust-prefix-allrisk-mapzp/`（62/196-A16
+  all-risk）；
+- `docs/quantization/p1_robust_training_results.md`（完整结果和参数）。
+
+两个目录各包含 28 个 `layerNN-lpbq-scales.safetensors` 和
+`streaming-train.json`。manifest 中的 `scale1_shape`、`scale2_shape`、codes
+SHA 必须用于 VM 侧 checkpoint 差分校验。当前训练使用 `fixed_zero_point=map`：
+zero-point 是固定整数，但不是统一 128；若 QNN 只能接受 `zp=128`，必须重新
+calibration/训练，不能直接改 JSON。
+
+### VM 交接顺序（增强结果）
+
+1. checkout/pull `codex/quant-npu-w4a8-roadmap`，确认 HEAD 至少为 `7c07c935`；
+2. 使用与 `D:\llm_exp\models\qualcomm-sdk\qairt\2.47.0.260601` 对应的
+   Linux QAIRT SDK，禁止混用旧版本；
+3. 从原始 Qwen3 checkpoint 和上述两个目录分别生成完整 G32
+   weight/scale1/scale2 checkpoint；逐层校验 codes SHA、shape 和 LPBQ decode；
+4. 用 `mllm-qwen3-aot-sha-g32-c` 为 mixed/all-risk 分别生成独立的 V79
+   context、manifest、s1/s32 schematic 和 SHA，不能复用旧 baseline context；
+5. 运行 `run_qwen3_sm8750_v79_prefix_streaming_mixed_profile.sh` 和
+   `run_qwen3_sm8750_v79_prefix_streaming_allrisk_profile.sh`。若从 WSL 调用
+   Windows ADB，设置 `ADB_BIN=adb.exe`，结果写入 `D:\llm_exp\results`；
+6. 只有 native `kQNN_LPBQ_w4a8o8_G32`（或等价 backend）完成单算子 contract
+   equality、AOT finalize、V79 真机 oracle 后，才能把结果标为 native W4A8 GO。
+
+当前已完成的是软件 provisional GO；QNN AOT/ADB 真机结果仍待 VM 构建。
+
 ## 已完成成果
 
 ### P0：静态 A8 scale optimization
@@ -21,7 +80,7 @@ ADB 真机验证回到 Linux VMware VM。
 - P0 产物位于 `artifacts/p0/static_a8/`，包括 sensitivity map、mixed map、
   all-risk map、逐 block/full-model 汇总。
 
-### P1：prefix-aware streaming trainer
+### P1：prefix-aware streaming trainer（旧 100-step 基线；增强结果见上节）
 
 `scripts/qwen3_p1_streaming_train.py` 按 layer streaming：前缀已经替换为固定
 量化 wrapper，只有当前 block 保留 autograd 图，训练结束立即导出并冻结该层。
@@ -39,7 +98,7 @@ ADB 真机验证回到 Linux VMware VM。
 mixed 的 cosine 较高但 held-out top-1 有下降。按当前放宽后的 GO 规则，all-risk
 是更稳妥的候选，但两者都还不是 cosine-parity GO。
 
-最终 scale 产物：
+历史 100-step scale 产物（仅用于回归对照）：
 
 - `artifacts/p1/streaming-full-mapzp/`
 - `artifacts/p1/streaming-full-allrisk-mapzp/`
@@ -64,7 +123,7 @@ FP32；weight int4 code 固定不变。
   manifest、precision map、native context SHA 和离线指标；默认拒绝旧的
   actaware/selective context，避免误标为本次 prefix-streaming 方案。
 
-## 回到 VM 后的下一步
+## 回到 VM 后的下一步（通用流程；增强产物路径见上节）
 
 1. 在 VM checkout 本分支，确认 QAIRT SDK 为
    `D:\llm_exp\models\qualcomm-sdk\qairt\2.47.0.260601` 对应的 Linux 环境。
