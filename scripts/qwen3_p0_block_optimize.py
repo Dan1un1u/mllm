@@ -206,9 +206,14 @@ class BlockQLinear(nn.Module):
         self.quantizer = None if init is None else LearnableA8FakeQuant(init)
         if self.quantizer is not None:
             self.quantizer.to(device=device)
+        # The P1 curriculum can first optimize the deployable LPBQ weight
+        # scales with A16 inputs, then enable the static A8 fake-quantizer.
+        # Keeping this as a module flag avoids replacing the trainable wrapper
+        # (and its optimizer state) between the two stages.
+        self.activation_quant_enabled = True
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.quantizer is not None:
+        if self.quantizer is not None and self.activation_quant_enabled:
             x = self.quantizer(x)
         weight = self.weight if self.lpbq_scale is None else self.lpbq_scale()
         return F.linear(x, weight.to(dtype=x.dtype), self.bias)
