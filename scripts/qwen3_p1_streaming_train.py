@@ -44,8 +44,10 @@ from qwen3_p0_block_optimize import (
 from pymllm.quantization.static_a8 import (
     A8Params,
     LPBQWeights,
+    calibrate_sym128_a8,
     fake_quantize_a8,
     pack_lpbq_codes_hwio,
+    symmetrize_a8_params,
 )
 
 
@@ -80,6 +82,12 @@ def parse_args() -> argparse.Namespace:
         "--sensitivity-map",
         type=Path,
         default=Path("artifacts/p0/static_a8/mixed-precision-map.json"),
+    )
+    parser.add_argument(
+        "--a8-recipe",
+        choices=("affine_map", "sym128_vsym"),
+        default="affine_map",
+        help="Activation contract; sym128_vsym uses UInt8 storage, zp=128, and a tied V output scale.",
     )
     parser.add_argument("--layers", default="0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27")
     parser.add_argument("--steps", type=int, default=100)
@@ -156,12 +164,45 @@ def sha256_file(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
+def adapt_selected_a8_recipe(
+    selected: dict[tuple[int, str], A8Params | None],
+    recipe: str,
+) -> dict[tuple[int, str], A8Params | None]:
+    if recipe == "affine_map":
+        return selected
+    if recipe != "sym128_vsym":
+        raise ValueError(f"unknown A8 recipe {recipe!r}")
+    return {
+        key: None if params is None else symmetrize_a8_params(params)
+        for key, params in selected.items()
+    }
+
+
+def manifest_a8_params(
+    params: A8Params | None,
+    *,
+    role: str,
+) -> dict[str, Any] | None:
+    if params is None:
+        return None
+    value = params.as_dict()
+    value.update(
+        {
+            "dtype": "UInt8",
+            "storage_dtype": "UInt8",
+            "role": role,
+        }
+    )
+    return value
+
+
 def install_trainable_layer(
     layer: nn.Module,
     params: dict[str, A8Params | None],
     device: torch.device,
     *,
     lpbq_overrides: dict[str, LPBQWeights] | None = None,
+    output_a8_params: dict[str, A8Params | None] | None = None,
 ) -> None:
     for projection, path in PROJECTIONS.items():
         original = nested_get(layer, path)
@@ -180,6 +221,11 @@ def install_trainable_layer(
                 device,
                 learn_weight_scale=True,
                 quantized_override=override,
+                output_a8_params=(
+                    None
+                    if output_a8_params is None
+                    else output_a8_params.get(projection)
+                ),
             ),
         )
 
@@ -241,6 +287,7 @@ class FixedQLinear(nn.Module):
         bias: torch.Tensor | None,
         a8_params: A8Params | None,
         *,
+        output_a8_params: A8Params | None = None,
         dtype: torch.dtype,
         device: torch.device,
     ) -> None:
@@ -251,6 +298,7 @@ class FixedQLinear(nn.Module):
             None if bias is None else bias.detach().to(device=device, dtype=dtype),
         )
         self.a8_params = a8_params
+        self.output_a8_params = output_a8_params
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.a8_params is not None:
@@ -261,7 +309,16 @@ class FixedQLinear(nn.Module):
                 quant_min=self.a8_params.quant_min,
                 quant_max=self.a8_params.quant_max,
             )
-        return F.linear(x, self.weight, self.bias)
+        output = F.linear(x, self.weight, self.bias)
+        if self.output_a8_params is not None:
+            output = fake_quantize_a8(
+                output,
+                self.output_a8_params.scale,
+                self.output_a8_params.zero_point,
+                quant_min=self.output_a8_params.quant_min,
+                quant_max=self.output_a8_params.quant_max,
+            )
+        return output
 
 
 def set_activation_quant_enabled(layer: nn.Module, enabled: bool) -> None:
@@ -279,10 +336,13 @@ def set_activation_scale_requires_grad(layer: nn.Module, enabled: bool) -> None:
 
     for path in PROJECTIONS.values():
         module = nested_get(layer, path)
-        if not isinstance(module, BlockQLinear) or module.quantizer is None:
+        if not isinstance(module, BlockQLinear):
             continue
-        for parameter in module.quantizer.parameters():
-            parameter.requires_grad_(enabled)
+        for quantizer in (module.quantizer, module.output_quantizer):
+            if quantizer is None:
+                continue
+            for parameter in quantizer.parameters():
+                parameter.requires_grad_(enabled)
 
 
 def snapshot_trainable_parameters(layer: nn.Module) -> dict[str, torch.Tensor]:
@@ -304,9 +364,14 @@ def restore_parameters(layer: nn.Module, state: dict[str, torch.Tensor]) -> None
 
 def collect_exported_candidate(
     layer: nn.Module,
-) -> tuple[dict[str, LPBQWeights], dict[str, A8Params | None]]:
+) -> tuple[
+    dict[str, LPBQWeights],
+    dict[str, A8Params | None],
+    dict[str, A8Params | None],
+]:
     scales: dict[str, LPBQWeights] = {}
     a8_params: dict[str, A8Params | None] = {}
+    output_a8_params: dict[str, A8Params | None] = {}
     for projection, path in PROJECTIONS.items():
         module = nested_get(layer, path)
         if not isinstance(module, BlockQLinear):
@@ -320,7 +385,12 @@ def collect_exported_candidate(
             if module.quantizer is None
             else module.quantizer.export_params()
         )
-    return scales, a8_params
+        output_a8_params[projection] = (
+            None
+            if module.output_quantizer is None
+            else module.output_quantizer.export_params()
+        )
+    return scales, a8_params, output_a8_params
 
 
 def evaluate_exported_candidate(
@@ -332,7 +402,7 @@ def evaluate_exported_candidate(
 ) -> float:
     """Evaluate the exact exported LPBQ/A8 representation, not continuous params."""
 
-    scales, a8_params = collect_exported_candidate(layer)
+    scales, a8_params, output_a8_params = collect_exported_candidate(layer)
     originals: dict[str, nn.Module] = {}
     for projection, path in PROJECTIONS.items():
         old = nested_get(layer, path)
@@ -344,6 +414,11 @@ def evaluate_exported_candidate(
                 scales[projection],
                 old.bias,
                 a8_params[projection] if use_activation_quant else None,
+                output_a8_params=(
+                    output_a8_params[projection]
+                    if use_activation_quant
+                    else None
+                ),
                 dtype=old.bias.dtype if old.bias is not None else torch.bfloat16,
                 device=device,
             ),
@@ -480,6 +555,7 @@ def export_and_freeze_layer(
     layer: nn.Module,
     learned_params: dict[str, A8Params | None],
     *,
+    output_a8_params: dict[str, A8Params | None] | None = None,
     device: torch.device,
     output_path: Path,
 ) -> dict[str, dict[str, Any]]:
@@ -525,6 +601,11 @@ def export_and_freeze_layer(
                 exported[projection],
                 old.bias,
                 learned_params[projection],
+                output_a8_params=(
+                    None
+                    if output_a8_params is None
+                    else output_a8_params.get(projection)
+                ),
                 dtype=old.bias.dtype if old.bias is not None else torch.bfloat16,
                 device=device,
             ),
@@ -578,6 +659,8 @@ def main() -> None:
         raise ValueError("--warmup-steps must be non-negative")
     if not 0.0 <= args.min_lr_ratio <= 1.0:
         raise ValueError("--min-lr-ratio must be in [0, 1]")
+    if args.a8_recipe == "sym128_vsym" and args.fixed_zero_point != "128":
+        raise ValueError("sym128_vsym requires --fixed-zero-point 128")
     if args.base_quant_checkpoint is not None and not args.base_quant_checkpoint.is_file():
         raise FileNotFoundError(args.base_quant_checkpoint)
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -629,6 +712,7 @@ def main() -> None:
     teacher_logits = [value.float() for value in teacher_logits]
     fixed_zero_point = None if args.fixed_zero_point == "map" else int(args.fixed_zero_point)
     selected = load_selected(args.sensitivity_map, fixed_zero_point=fixed_zero_point)
+    selected = adapt_selected_a8_recipe(selected, args.a8_recipe)
     base_checkpoint_sha256 = (
         None
         if args.base_quant_checkpoint is None
@@ -664,6 +748,10 @@ def main() -> None:
         "selection_split": args.selection_split,
         "fixed_zero_point": fixed_zero_point,
         "target_mode": args.target_mode,
+        "a8_recipe": args.a8_recipe,
+        "storage_dtype": "UInt8",
+        "zero_point": 128 if args.a8_recipe == "sym128_vsym" else fixed_zero_point,
+        "v_scale_tied": args.a8_recipe == "sym128_vsym",
         "rows": [],
         "complete": False,
     }
@@ -672,8 +760,20 @@ def main() -> None:
 
     for layer_index in layers:
         layer = model.model.layers[layer_index]
-        train_examples = capture_examples(model, train_inputs, layer_index, device)
-        held_out_examples = capture_examples(model, held_out_inputs, layer_index, device)
+        train_examples = capture_examples(
+            model,
+            train_inputs,
+            layer_index,
+            device,
+            capture_v_output=args.a8_recipe == "sym128_vsym",
+        )
+        held_out_examples = capture_examples(
+            model,
+            held_out_inputs,
+            layer_index,
+            device,
+            capture_v_output=args.a8_recipe == "sym128_vsym",
+        )
         if args.target_mode == "teacher":
             for example, target in zip(
                 train_examples, teacher_train_blocks[layer_index]
@@ -686,6 +786,25 @@ def main() -> None:
         initial_params = {
             projection: selected[(layer_index, projection)] for projection in PROJECTIONS
         }
+        output_a8_params: dict[str, A8Params | None] | None = None
+        if args.a8_recipe == "sym128_vsym":
+            # A projection explicitly selected for A16 must keep the whole
+            # V boundary in A16.  Otherwise a mixed map would silently use
+            # A16 for the V input but still requantize the V output/cache to
+            # symmetric A8, which is not a deployable layer-level fallback.
+            if initial_params["v_proj"] is not None:
+                v_values = torch.cat(
+                    [example["v_output"].reshape(-1) for example in train_examples]
+                )
+                output_a8_params = {
+                    "v_proj": calibrate_sym128_a8(
+                        v_values,
+                        method="learnable",
+                        percentile=99.9,
+                    )
+                }
+            else:
+                output_a8_params = {"v_proj": None}
         base_lpbq = (
             None
             if args.base_quant_checkpoint is None
@@ -696,6 +815,7 @@ def main() -> None:
             initial_params,
             device,
             lpbq_overrides=base_lpbq,
+            output_a8_params=output_a8_params,
         )
         selection_examples = (
             train_examples
@@ -737,6 +857,14 @@ def main() -> None:
             )
             for projection, path in PROJECTIONS.items()
         }
+        learned_output_params = {
+            projection: (
+                None
+                if nested_get(layer, path).output_quantizer is None
+                else nested_get(layer, path).output_quantizer.export_params().as_dict()
+            )
+            for projection, path in PROJECTIONS.items()
+        }
         learned_a8_params = {
             projection: None if params is None else A8Params(**params)
             for projection, params in learned_params.items()
@@ -746,6 +874,12 @@ def main() -> None:
         scale_metadata = export_and_freeze_layer(
             layer,
             learned_a8_params,
+            output_a8_params={
+                projection: None
+                if params is None
+                else A8Params(**params)
+                for projection, params in learned_output_params.items()
+            },
             device=device,
             output_path=scale_path,
         )
@@ -762,6 +896,32 @@ def main() -> None:
             "optimization": {"stage1": stage1, "stage2": stage2},
             "exported_local_block_output": exported_local_metrics,
             "learned_params": learned_params,
+            "learned_params_manifest": {
+                projection: manifest_a8_params(
+                    None if params is None else A8Params(**params),
+                    role="linear_input",
+                )
+                for projection, params in learned_params.items()
+            },
+            "v_output_params": {
+                projection: manifest_a8_params(
+                    None if params is None else A8Params(**params),
+                    role="v_projection_cache_attention_tied",
+                )
+                for projection, params in learned_output_params.items()
+            },
+            "v_scale_identity": (
+                None
+                if learned_output_params.get("v_proj") is None
+                else {
+                    "projection": "v_proj.output",
+                    "cache": "v_cache",
+                    "attention_input": "attention.value_input",
+                    "scale": learned_output_params["v_proj"]["scale"],
+                    "zero_point": learned_output_params["v_proj"]["zero_point"],
+                    "tied": True,
+                }
+            ),
             "lpbq_scales_file": scale_path.name,
             "lpbq_scale_metadata": scale_metadata,
         }

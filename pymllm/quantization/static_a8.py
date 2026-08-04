@@ -29,6 +29,7 @@ from torch.nn import functional as F
 
 
 A8Method = Literal["max_min", "mean_3sigma", "percentile", "learnable"]
+A8Recipe = Literal["affine_map", "sym128_vsym"]
 A8_QMIN = 0
 A8_QMAX = 255
 LPBQ_EPS = 0.0001 / 65535.0
@@ -52,6 +53,7 @@ class A8Params:
     quant_max: int = A8_QMAX
     percentile: float | None = None
     warm_start_method: str | None = None
+    recipe: str = "affine_map"
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -221,6 +223,72 @@ def calibrate_a8(
     )
 
 
+def calibrate_sym128_a8(
+    x: torch.Tensor,
+    method: A8Method | str = "learnable",
+    *,
+    percentile: float = 99.9,
+    warm_start_method: str = "percentile",
+    warm_start_percentile: float | None = None,
+) -> A8Params:
+    """Calibrate signed-int8 symmetric A8 stored in a UInt8 tensor.
+
+    The hardware contract is ``q_signed in [-128, 127]`` followed by
+    ``q_uint8 = q_signed + 128``.  The stored zero-point is therefore always
+    the integer constant 128; only the positive clipping half-range/scale is
+    learned.
+    """
+
+    values = _finite_values(x)
+    requested_method = str(method).lower().replace("-", "_")
+    if requested_method == "learnable":
+        init_method = warm_start_method
+        init_percentile = (
+            percentile if warm_start_percentile is None else warm_start_percentile
+        )
+    else:
+        init_method = requested_method
+        init_percentile = percentile
+    low, high = _range_for_method(
+        values,
+        init_method,
+        percentile=init_percentile,
+    )
+    alpha = max(abs(float(low)), abs(float(high)), 127.0 * LPBQ_EPS)
+    scale = max(alpha / 127.0, LPBQ_EPS)
+    return A8Params(
+        method=str(method),
+        scale=float(scale),
+        zero_point=128,
+        clip_min=float(-128.0 * scale),
+        clip_max=float(127.0 * scale),
+        quant_min=A8_QMIN,
+        quant_max=A8_QMAX,
+        percentile=(float(init_percentile) if init_method == "percentile" else None),
+        warm_start_method=(init_method if requested_method == "learnable" else None),
+        recipe="sym128_vsym",
+    )
+
+
+def symmetrize_a8_params(
+    params: A8Params,
+    *,
+    recipe: A8Recipe = "sym128_vsym",
+) -> A8Params:
+    """Convert an affine calibration candidate to the UInt8 symmetric recipe."""
+
+    alpha = max(abs(float(params.clip_min)), abs(float(params.clip_max)))
+    scale = max(alpha / 127.0, LPBQ_EPS)
+    return replace(
+        params,
+        scale=float(scale),
+        zero_point=128,
+        clip_min=float(-128.0 * scale),
+        clip_max=float(127.0 * scale),
+        recipe=recipe,
+    )
+
+
 def fake_quantize_a8(
     x: torch.Tensor,
     scale: torch.Tensor | float,
@@ -258,6 +326,24 @@ def fake_quantize_a8(
     else:
         bounded = q.round().clamp(quant_min, quant_max)
     return (bounded - zero_point) * scale
+
+
+def fake_quantize_sym128_a8(
+    x: torch.Tensor,
+    scale: torch.Tensor | float,
+    *,
+    ste: bool = False,
+) -> torch.Tensor:
+    """Apply the explicit UInt8-storage/signed-int8 symmetric A8 contract."""
+
+    return fake_quantize_a8(
+        x,
+        scale,
+        128,
+        quant_min=A8_QMIN,
+        quant_max=A8_QMAX,
+        ste=ste,
+    )
 
 
 class LearnableA8FakeQuant(nn.Module):
@@ -301,6 +387,7 @@ class LearnableA8FakeQuant(nn.Module):
             quant_max=self.quant_max,
             percentile=self.initial_params.percentile,
             warm_start_method=self.initial_params.warm_start_method,
+            recipe=self.initial_params.recipe,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

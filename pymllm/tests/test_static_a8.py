@@ -6,12 +6,15 @@ from pymllm.quantization.static_a8 import (
     LearnableLPBQScale,
     LearnableA8FakeQuant,
     calibrate_a8,
+    calibrate_sym128_a8,
     fake_quantize_a8,
+    fake_quantize_sym128_a8,
     freeze_a8_zero_point,
     lpbq_quantize_g32,
     lpbq_rebuild_with_scales,
     optimize_linear_input_scale,
     pack_lpbq_codes_hwio,
+    symmetrize_a8_params,
 )
 
 
@@ -25,6 +28,29 @@ def test_affine_a8_roundtrip_uses_fixed_integer_zero_point() -> None:
     assert torch.isfinite(decoded).all()
     assert decoded.min() >= params.clip_min - params.scale
     assert decoded.max() <= params.clip_max + params.scale
+
+
+def test_sym128_a8_uses_uint8_storage_and_fixed_zero_point() -> None:
+    values = torch.tensor([-3.0, -1.0, 0.0, 1.0, 2.0])
+    params = calibrate_sym128_a8(values, "learnable")
+    assert params.recipe == "sym128_vsym"
+    assert params.zero_point == 128
+    assert params.clip_min < 0.0 < params.clip_max
+    decoded = fake_quantize_sym128_a8(values, params.scale)
+    assert torch.isfinite(decoded).all()
+    assert torch.equal(
+        decoded,
+        fake_quantize_a8(values, params.scale, 128),
+    )
+
+
+def test_symmetrize_a8_params_rebuilds_signed_range() -> None:
+    affine = calibrate_a8(torch.tensor([-2.0, 0.0, 4.0]), "max_min")
+    symmetric = symmetrize_a8_params(affine)
+    assert symmetric.recipe == "sym128_vsym"
+    assert symmetric.zero_point == 128
+    assert symmetric.clip_min == -128.0 * symmetric.scale
+    assert symmetric.clip_max == 127.0 * symmetric.scale
 
 
 def test_lpbq_g32_shape_and_decode_contract() -> None:

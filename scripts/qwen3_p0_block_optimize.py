@@ -181,6 +181,7 @@ class BlockQLinear(nn.Module):
         *,
         learn_weight_scale: bool = False,
         quantized_override: LPBQWeights | None = None,
+        output_a8_params: A8Params | None = None,
     ) -> None:
         super().__init__()
         quantized = (
@@ -206,6 +207,11 @@ class BlockQLinear(nn.Module):
         self.quantizer = None if init is None else LearnableA8FakeQuant(init)
         if self.quantizer is not None:
             self.quantizer.to(device=device)
+        self.output_quantizer = (
+            None
+            if output_a8_params is None
+            else LearnableA8FakeQuant(output_a8_params).to(device=device)
+        )
         # The P1 curriculum can first optimize the deployable LPBQ weight
         # scales with A16 inputs, then enable the static A8 fake-quantizer.
         # Keeping this as a module flag avoids replacing the trainable wrapper
@@ -216,7 +222,10 @@ class BlockQLinear(nn.Module):
         if self.quantizer is not None and self.activation_quant_enabled:
             x = self.quantizer(x)
         weight = self.weight if self.lpbq_scale is None else self.lpbq_scale()
-        return F.linear(x, weight.to(dtype=x.dtype), self.bias)
+        output = F.linear(x, weight.to(dtype=x.dtype), self.bias)
+        if self.output_quantizer is not None and self.activation_quant_enabled:
+            output = self.output_quantizer(output)
+        return output
 
     @torch.no_grad()
     def export_lpbq(self) -> LPBQWeights | None:
@@ -230,6 +239,8 @@ def capture_examples(
     model_inputs: list[dict[str, torch.Tensor]],
     layer_index: int,
     device: torch.device,
+    *,
+    capture_v_output: bool = False,
 ) -> list[dict[str, Any]]:
     examples: list[dict[str, Any]] = []
     current: dict[str, Any] = {}
@@ -242,8 +253,16 @@ def capture_examples(
     def post_hook(_module, _args, output):
         current["target"] = first_tensor(output).detach().cpu().float().contiguous()
 
+    def v_output_hook(_module, _args, output):
+        current["v_output"] = first_tensor(output).detach().cpu().float().contiguous()
+
     pre_handle = layer.register_forward_pre_hook(pre_hook, with_kwargs=True)
     post_handle = layer.register_forward_hook(post_hook)
+    v_handle = (
+        layer.self_attn.v_proj.register_forward_hook(v_output_hook)
+        if capture_v_output
+        else None
+    )
     try:
         for model_input in model_inputs:
             current.clear()
@@ -260,6 +279,8 @@ def capture_examples(
     finally:
         pre_handle.remove()
         post_handle.remove()
+        if v_handle is not None:
+            v_handle.remove()
     return examples
 
 
