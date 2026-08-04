@@ -11,6 +11,7 @@ from pymllm.quantization.static_a8 import (
     lpbq_quantize_g32,
     lpbq_rebuild_with_scales,
     optimize_linear_input_scale,
+    pack_lpbq_codes_hwio,
 )
 
 
@@ -36,6 +37,17 @@ def test_lpbq_g32_shape_and_decode_contract() -> None:
     assert quantized.scale1.dtype == torch.uint8
     assert torch.all((quantized.codes >= -7) & (quantized.codes <= 7))
     assert torch.isfinite(quantized.decoded).all()
+
+
+def test_lpbq_hwio_pack_roundtrip_preserves_logical_codes() -> None:
+    generator = torch.Generator().manual_seed(41)
+    codes = torch.randint(-7, 8, (64, 64), generator=generator, dtype=torch.int8)
+    packed = pack_lpbq_codes_hwio(codes)
+    assert packed.shape == (1, 1, 64, 64)
+    carrier = packed.reshape(64, 64).to(torch.int16)
+    nibble = carrier & 0x0F
+    restored = torch.where(nibble >= 8, nibble - 16, nibble).transpose(0, 1).to(torch.int8)
+    assert torch.equal(restored, codes)
 
 
 def test_lpbq_matches_exporter_primitive_when_torchao_is_available() -> None:

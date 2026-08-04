@@ -45,13 +45,25 @@ from pymllm.quantization.static_a8 import (
     A8Params,
     LPBQWeights,
     fake_quantize_a8,
+    pack_lpbq_codes_hwio,
 )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--model", type=Path, default=Path("/home/daniuniu/llm_exp/models/Qwen3-origin")
+        "--model",
+        "--teacher-model",
+        dest="model",
+        type=Path,
+        default=Path("/home/daniuniu/llm_exp/models/Qwen3-origin"),
+        help="BF16 teacher checkpoint; never used to regenerate fixed INT4 codes when --base-quant-checkpoint is set.",
+    )
+    parser.add_argument(
+        "--base-quant-checkpoint",
+        type=Path,
+        default=None,
+        help="QNN/QLinearLPBQ G32 model.safetensors supplying fixed INT4 codes and initial scale1/scale2.",
     )
     parser.add_argument(
         "--prompt-tsv", type=Path, default=Path("scripts/qwen3_sm8750_v79_accuracy.tsv")
@@ -136,13 +148,29 @@ def parse_layers(value: str) -> list[int]:
     return layers
 
 
+def sha256_file(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(chunk_size):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def install_trainable_layer(
     layer: nn.Module,
     params: dict[str, A8Params | None],
     device: torch.device,
+    *,
+    lpbq_overrides: dict[str, LPBQWeights] | None = None,
 ) -> None:
     for projection, path in PROJECTIONS.items():
         original = nested_get(layer, path)
+        override = None if lpbq_overrides is None else lpbq_overrides[projection]
+        if override is not None and tuple(override.codes.shape) != tuple(original.weight.shape):
+            raise ValueError(
+                f"{projection}: base codes {tuple(override.codes.shape)} do not match "
+                f"teacher weight {tuple(original.weight.shape)}"
+            )
         nested_set(
             layer,
             path,
@@ -151,8 +179,57 @@ def install_trainable_layer(
                 params[projection],
                 device,
                 learn_weight_scale=True,
+                quantized_override=override,
             ),
         )
+
+
+def load_base_lpbq_layer(
+    checkpoint: Path,
+    layer_index: int,
+) -> dict[str, LPBQWeights]:
+    """Load one layer's HWIO carrier and scales from the authoritative G32 base."""
+
+    from safetensors import safe_open
+
+    result: dict[str, LPBQWeights] = {}
+    with safe_open(str(checkpoint), framework="pt", device="cpu") as handle:
+        for projection, module_path in PROJECTIONS.items():
+            prefix = f"model.layers.{layer_index}.{module_path}"
+            weight = handle.get_tensor(prefix + ".weight")
+            scale1_flat = handle.get_tensor(prefix + ".scale1")
+            scale2 = handle.get_tensor(prefix + ".scale2")
+            if weight.ndim != 4 or tuple(weight.shape[:2]) != (1, 1):
+                raise ValueError(
+                    f"{prefix}: expected HWIO [1,1,K,O], got {tuple(weight.shape)}"
+                )
+            in_features = int(weight.shape[2])
+            out_features = int(weight.shape[3])
+            if in_features % 32:
+                raise ValueError(f"{prefix}: K={in_features} is not divisible by G32")
+            carrier = weight.reshape(in_features, out_features).to(torch.int16)
+            nibble = torch.bitwise_and(carrier, 0x0F)
+            signed = torch.where(nibble >= 8, nibble - 16, nibble)
+            codes = signed.transpose(0, 1).contiguous().to(torch.int8)
+            scale1 = scale1_flat.reshape(out_features, in_features // 32).contiguous()
+            scale2 = scale2.reshape(out_features).contiguous().to(torch.float32)
+            if tuple(scale1.shape) != (out_features, in_features // 32):
+                raise ValueError(f"{prefix}: invalid scale1 shape {tuple(scale1.shape)}")
+            if int(scale1.min()) < 1 or int(scale1.max()) > 16:
+                raise ValueError(f"{prefix}: scale1 is outside UInt4 range [1,16]")
+            decoded = (
+                codes.reshape(out_features, in_features // 32, 32).float()
+                * scale1.float().unsqueeze(-1)
+                * scale2[:, None, None]
+            ).reshape(out_features, in_features).contiguous()
+            result[projection] = LPBQWeights(
+                codes=codes,
+                scale1=scale1.to(torch.uint8),
+                scale2=scale2,
+                decoded=decoded,
+                group_size=32,
+            )
+    return result
 
 
 class FixedQLinear(nn.Module):
@@ -420,10 +497,19 @@ def export_and_freeze_layer(
         tensors[f"{projection}.scale1"] = scales.scale1.detach().cpu()
         tensors[f"{projection}.scale2"] = scales.scale2.detach().cpu()
         code_bytes = scales.codes.detach().cpu().contiguous().numpy().tobytes()
+        packed_code_bytes = (
+            pack_lpbq_codes_hwio(scales.codes.detach().cpu())
+            .contiguous()
+            .numpy()
+            .tobytes()
+        )
         metadata[projection] = {
             "scale1_shape": list(scales.scale1.shape),
             "scale2_shape": list(scales.scale2.shape),
             "codes_sha256": hashlib.sha256(code_bytes).hexdigest(),
+            "codes_layout": "OI signed int8 logical codes",
+            "packed_codes_sha256": hashlib.sha256(packed_code_bytes).hexdigest(),
+            "packed_codes_layout": "HWIO [1,1,K,O] low-nibble int8 carrier",
         }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     save_file(tensors, str(output_path))
@@ -492,6 +578,8 @@ def main() -> None:
         raise ValueError("--warmup-steps must be non-negative")
     if not 0.0 <= args.min_lr_ratio <= 1.0:
         raise ValueError("--min-lr-ratio must be in [0, 1]")
+    if args.base_quant_checkpoint is not None and not args.base_quant_checkpoint.is_file():
+        raise FileNotFoundError(args.base_quant_checkpoint)
     if args.device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA requested but unavailable")
     device = torch.device(args.device)
@@ -541,11 +629,28 @@ def main() -> None:
     teacher_logits = [value.float() for value in teacher_logits]
     fixed_zero_point = None if args.fixed_zero_point == "map" else int(args.fixed_zero_point)
     selected = load_selected(args.sensitivity_map, fixed_zero_point=fixed_zero_point)
+    base_checkpoint_sha256 = (
+        None
+        if args.base_quant_checkpoint is None
+        else sha256_file(args.base_quant_checkpoint)
+    )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     result: dict[str, Any] = {
         "schema_version": 1,
         "purpose": "P1 prefix-aware streaming A8+LPBQ scale training",
         "model": str(args.model),
+        "teacher_model": str(args.model),
+        "base_quant_checkpoint": (
+            None
+            if args.base_quant_checkpoint is None
+            else str(args.base_quant_checkpoint)
+        ),
+        "base_quant_checkpoint_sha256": base_checkpoint_sha256,
+        "weight_code_source": (
+            "base_quant_checkpoint"
+            if args.base_quant_checkpoint is not None
+            else "teacher_model_requantized"
+        ),
         "layers": layers,
         "train_indices": train_indices,
         "held_out_indices": held_out_indices,
@@ -581,7 +686,17 @@ def main() -> None:
         initial_params = {
             projection: selected[(layer_index, projection)] for projection in PROJECTIONS
         }
-        install_trainable_layer(layer, initial_params, device)
+        base_lpbq = (
+            None
+            if args.base_quant_checkpoint is None
+            else load_base_lpbq_layer(args.base_quant_checkpoint, layer_index)
+        )
+        install_trainable_layer(
+            layer,
+            initial_params,
+            device,
+            lpbq_overrides=base_lpbq,
+        )
         selection_examples = (
             train_examples
             if args.selection_split == "train"
@@ -638,6 +753,11 @@ def main() -> None:
         row = {
             "layer": layer_index,
             "prefix_is_quantized": layer_index > min(layers),
+            "weight_code_source": (
+                "base_quant_checkpoint"
+                if base_lpbq is not None
+                else "teacher_model_requantized"
+            ),
             "local_block_output": local_metrics,
             "optimization": {"stage1": stage1, "stage2": stage2},
             "exported_local_block_output": exported_local_metrics,

@@ -90,6 +90,17 @@ class LPBQWeights:
     group_size: int
 
 
+def pack_lpbq_codes_hwio(codes: torch.Tensor) -> torch.Tensor:
+    """Pack logical signed OI INT4 codes into the QNN HWIO carrier."""
+
+    if codes.ndim != 2:
+        raise ValueError(f"expected OI codes [out, in], got {tuple(codes.shape)}")
+    out_features, in_features = map(int, codes.shape)
+    signed = codes.to(dtype=torch.int8).transpose(0, 1).contiguous()
+    carrier = torch.bitwise_and(signed, 0x0F)
+    return carrier.reshape(1, 1, in_features, out_features).contiguous()
+
+
 def _finite_values(x: torch.Tensor) -> torch.Tensor:
     if not isinstance(x, torch.Tensor):
         raise TypeError(f"expected a torch.Tensor, got {type(x).__name__}")

@@ -9,7 +9,8 @@ ADB 真机验证回到 Linux VMware VM。
 
 ## 增强训练更新（本节结果覆盖下方旧的 100-step 基线表）
 
-最新提交为 `7c07c935`。在不引入 rotation 的前提下，P1 trainer 已升级为
+上一版增强训练提交为 `7c07c935`。本次 source-aligned 重跑的代码、manifest
+和交接说明随当前分支最新提交更新。在不引入 rotation 的前提下，P1 trainer 已升级为
 部署闭环的两阶段 curriculum，并在 WSL RTX 5070 Ti 12 GB 上完成 28 层全模型
 训练：
 
@@ -30,36 +31,46 @@ ADB 真机验证回到 Linux VMware VM。
 | 旧 prefix all-risk | 62/196 | 0.889310 | 1.000000 | 0.221470 | 0.005967 |
 | **增强 prefix mixed** | **46/196** | **0.903255** | **0.833333** | **0.204042** | **0.005287** |
 | **增强 prefix all-risk** | **62/196** | **0.918487** | **1.000000** | **0.169250** | **0.005310** |
+| **source-aligned prefix all-risk** | **62/196** | **0.915216** | **1.000000** | **0.171894** | **see manifest** |
 
-增强 all-risk 比旧 all-risk 提升 `+0.029177` cosine，并保持与 W4A16 相同的
-held-out top-1；这是目前的 software provisional GO 候选。增强 mixed 提升
-`+0.007942` cosine，但 top-1 仍为 `83.3%`。`0.918487` 仍是 PyTorch
-fake-quant oracle 数字，不能直接写成 native QNN W4A8 精度。
+增强 all-risk 比旧 all-risk 提升 `+0.029177` cosine，但它使用的是 teacher
+现场重新生成的 code，不能作为 VM checkpoint 输入。现在的 authoritative
+source-aligned all-risk 使用 G32 base 中的固定 code，logits cosine 为
+`0.915216`、top-1 为 `100%`；这才是 VM 构建候选。增强 mixed 提升
+`+0.007942` cosine，但 top-1 仍为 `83.3%`。上述数字仍是 PyTorch
+fake-quant oracle，不能直接写成 native QNN W4A8 精度。
 
-本次 VM 构建必须使用以下新产物，而不是旧 teacher/smoke 目录：
+本次 VM 构建必须使用 source-aligned 产物，而不是旧 teacher-regenerated 或
+teacher/smoke 目录：
 
-- `artifacts/p1/streaming-full-robust-prefix-mapzp/`（46/196-A16 mixed）；
-- `artifacts/p1/streaming-full-robust-prefix-allrisk-mapzp/`（62/196-A16
-  all-risk）；
+- `artifacts/p1/aligned-full-allrisk-base-g32-mapzp/`（62/196-A16 all-risk）；
 - `docs/quantization/p1_robust_training_results.md`（完整结果和参数）。
 
-两个目录各包含 28 个 `layerNN-lpbq-scales.safetensors` 和
-`streaming-train.json`。manifest 中的 `scale1_shape`、`scale2_shape`、codes
-SHA 必须用于 VM 侧 checkpoint 差分校验。当前训练使用 `fixed_zero_point=map`：
-zero-point 是固定整数，但不是统一 128；若 QNN 只能接受 `zp=128`，必须重新
-calibration/训练，不能直接改 JSON。
+该目录包含 28 个 `layerNN-lpbq-scales.safetensors` 和
+`streaming-train.json`。训练 teacher 为
+`/home/daniuniu/llm_exp/models/Qwen3-origin`，固定 code/初始 scale 来源为
+`/mnt/d/llm_exp/models/Qwen3-1.7B-G32-base/model.safetensors`，base SHA-256
+为 `6caa0d36ef6846ad2ab138335204699d9abd44c7dd30df25a5846a6b3e5e6bae`。
+manifest 中的 logical OI `codes_sha256` 和 packed HWIO
+`packed_codes_sha256` 已对 196/196 projection 全部核对一致。当前训练使用
+`fixed_zero_point=map`：zero-point 是固定整数，但不是统一 128；若 QNN 只能
+接受 `zp=128`，必须重新 calibration/训练，不能直接改 JSON。
 
 ### VM 交接顺序（增强结果）
 
-1. checkout/pull `codex/quant-npu-w4a8-roadmap`，确认 HEAD 至少为 `7c07c935`；
+1. checkout/pull `codex/quant-npu-w4a8-roadmap`，确认 HEAD 包含 aligned trainer
+   和 source-aligned artifact；
 2. 使用与 `D:\llm_exp\models\qualcomm-sdk\qairt\2.47.0.260601` 对应的
    Linux QAIRT SDK，禁止混用旧版本；
-3. 从原始 Qwen3 checkpoint 和上述两个目录分别生成完整 G32
-   weight/scale1/scale2 checkpoint；逐层校验 codes SHA、shape 和 LPBQ decode；
-4. 用 `mllm-qwen3-aot-sha-g32-c` 为 mixed/all-risk 分别生成独立的 V79
+3. 不要重新量化 BF16 teacher。运行
+   `scripts/merge_qwen3_lpbq_scales_from_base.py`，以
+   `Qwen3-1.7B-G32-base/model.safetensors` 作为唯一 code/初始 scale 来源，
+   只把 source-aligned all-risk 目录中的 learned `scale1/scale2` 合并进去；
+   合并后逐层校验两种 code SHA、shape 和 LPBQ decode。该脚本会拒绝 base SHA
+   不匹配或 packed code 不匹配的输入；
+4. 用 `mllm-qwen3-aot-sha-g32-c` 为 source-aligned all-risk 生成独立的 V79
    context、manifest、s1/s32 schematic 和 SHA，不能复用旧 baseline context；
-5. 运行 `run_qwen3_sm8750_v79_prefix_streaming_mixed_profile.sh` 和
-   `run_qwen3_sm8750_v79_prefix_streaming_allrisk_profile.sh`。若从 WSL 调用
+5. 运行 `run_qwen3_sm8750_v79_prefix_streaming_allrisk_profile.sh`。若从 WSL 调用
    Windows ADB，设置 `ADB_BIN=adb.exe`，结果写入 `D:\llm_exp\results`；
 6. 只有 native `kQNN_LPBQ_w4a8o8_G32`（或等价 backend）完成单算子 contract
    equality、AOT finalize、V79 真机 oracle 后，才能把结果标为 native W4A8 GO。
@@ -127,8 +138,10 @@ FP32；weight int4 code 固定不变。
 
 1. 在 VM checkout 本分支，确认 QAIRT SDK 为
    `D:\llm_exp\models\qualcomm-sdk\qairt\2.47.0.260601` 对应的 Linux 环境。
-2. 从原始 Qwen3 checkpoint 和上述 28 个 scale 文件生成两套完整 G32
-   checkpoint；校验每层 codes SHA、scale1/scale2 shape 和 LPBQ decode 差分。
+2. 按上一节的 merge 脚本，从 `Qwen3-1.7B-G32-base/model.safetensors`
+   生成 source-aligned all-risk 完整 G32 checkpoint；校验每层 codes SHA、
+   scale1/scale2 shape 和 LPBQ decode 差分。BF16 teacher 只用于生成/校验
+   calibration 与模型输出，不得作为 INT4 code 的替代来源。
 3. 用 `mllm-qwen3-aot-sha-g32-c` 生成两套 native V79 context 和 s1/s32
    schematics。context 必须使用方案独立文件名和 SHA，不能复用旧 baseline。
 4. 在 VM 运行两个 wrapper；如果通过 WSL 调用 Windows ADB，设置

@@ -23,6 +23,24 @@ rate, gradient clipping at 1.0, and a deployment round-trip evaluation every
 50 steps. Candidate selection is performed after rounding `scale1` to UInt4,
 rebuilding the decoded LPBQ weight, and applying the fixed A8 zero-point.
 
+## Source-aligned rerun (authoritative for VM)
+
+The earlier extended runs regenerated INT4 codes from the BF16 teacher inside
+the trainer. They remain useful software experiments, but they are **not** the
+deployment artifact for the VM. The authoritative rerun uses two explicit
+sources:
+
+- BF16 teacher: `/home/daniuniu/llm_exp/models/Qwen3-origin`;
+- fixed G32 INT4 code and initial `scale1/scale2`:
+  `/mnt/d/llm_exp/models/Qwen3-1.7B-G32-base/model.safetensors`.
+
+The trainer now decodes the base file's HWIO carrier to logical OI signed INT4
+codes, keeps those codes fixed, and learns only the LPBQ scales/A8 scales. The
+aligned manifest records both `codes_sha256` (logical OI) and
+`packed_codes_sha256` (HWIO low-nibble carrier). All `196/196` projection hashes
+match the G32 base checkpoint; the base file SHA-256 is
+`6caa0d36ef6846ad2ab138335204699d9abd44c7dd30df25a5846a6b3e5e6bae`.
+
 ## Held-out software-oracle results
 
 | variant | A16 Linear inputs | logits cosine | top-1 agreement | logits NMSE | aggregate block NMSE |
@@ -32,6 +50,7 @@ rebuilding the decoded LPBQ weight, and applying the fixed A8 zero-point.
 | previous prefix all-risk | 62/196 | 0.889310 | 1.000000 | 0.221470 | 0.005967 |
 | **extended prefix mixed** | **46/196** | **0.903255** | **0.833333** | **0.204042** | **0.005287** |
 | **extended prefix all-risk** | **62/196** | **0.918487** | **1.000000** | **0.169250** | **0.005310** |
+| **source-aligned prefix all-risk** | **62/196** | **0.915216** | **1.000000** | **0.171894** | **see manifest** |
 
 The extended mixed map improves cosine by `+0.007942` over the previous mixed
 run. The extended all-risk map improves cosine by `+0.029177`, preserves the
@@ -39,12 +58,19 @@ W4A16 held-out top-1 agreement, and is `+0.001621` above the recorded W4A16
 cosine reference in this software oracle. This is a candidate result, not a
 native-QNN accuracy claim.
 
+The source-aligned all-risk result is the one to take to the VM: logits cosine
+`0.915216`, top-1 agreement `1.000000`, with fixed codes from the G32 base. The
+earlier `0.918487` result used teacher-regenerated codes and must not be used for
+QNN checkpoint construction.
+
 ## Artifacts
 
 - mixed manifest and 28 exported scale files:
   `artifacts/p1/streaming-full-robust-prefix-mapzp/`
 - all-risk manifest and 28 exported scale files:
   `artifacts/p1/streaming-full-robust-prefix-allrisk-mapzp/`
+- source-aligned all-risk manifest and 28 exported scale files (VM input):
+  `artifacts/p1/aligned-full-allrisk-base-g32-mapzp/`
 - one-layer dry-run:
   `artifacts/p1/streaming-dryrun-enhanced/`
 
@@ -55,9 +81,9 @@ Each full run reports `complete=true`, contains 28 per-layer rows, and exports
 
 The result shows that the previous 100-step/fixed-learning-rate setup was not
 the static-scale ceiling. Deployment-aware curriculum and candidate selection
-recover most of the earlier cosine gap without rotation. The 62/196 all-risk
-map is the current software-oracle candidate because it is both cosine-parity
-with W4A16 and top-1 parity on the held-out split.
+recover most of the earlier cosine gap without rotation. For VM construction,
+the source-aligned 62/196 all-risk map is the candidate: it preserves top-1
+parity and its 196 code hashes match the authoritative G32 base.
 
 The result is still not a QNN deployment result: this branch does not yet have
 the native `kQNN_LPBQ_w4a8o8_G32` backend. Before calling this a device GO,
