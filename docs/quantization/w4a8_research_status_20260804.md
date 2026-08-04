@@ -32,6 +32,14 @@ ADB 真机验证回到 Linux VMware VM。
 | **增强 prefix mixed** | **46/196** | **0.903255** | **0.833333** | **0.204042** | **0.005287** |
 | **增强 prefix all-risk** | **62/196** | **0.918487** | **1.000000** | **0.169250** | **0.005310** |
 | **source-aligned prefix all-risk** | **62/196** | **0.915216** | **1.000000** | **0.171894** | **see manifest** |
+| **source-aligned prefix mixed** | **46/196** | **0.917246** | **0.666667** | **0.173365** | **see manifest** |
+| **source-aligned full W4A8** | **0/196** | **0.104340** | **0.000000** | **1.520334** | **see manifest** |
+
+Source-aligned follow-up experiments: the original 46/196 mixed map completed
+with logits cosine `0.917246` but held-out top-1 `66.7%`; the no-fallback full
+W4A8 run completed with cosine `0.104340` and top-1 `0%`. Both manifests have
+zero logical/packed code mismatches against the authoritative G32 base. The
+full-W4A8 run is a negative control, not a VM deployment candidate.
 
 增强 all-risk 比旧 all-risk 提升 `+0.029177` cosine，但它使用的是 teacher
 现场重新生成的 code，不能作为 VM checkpoint 输入。现在的 authoritative

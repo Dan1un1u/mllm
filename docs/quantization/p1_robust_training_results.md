@@ -40,6 +40,9 @@ aligned manifest records both `codes_sha256` (logical OI) and
 `packed_codes_sha256` (HWIO low-nibble carrier). All `196/196` projection hashes
 match the G32 base checkpoint; the base file SHA-256 is
 `6caa0d36ef6846ad2ab138335204699d9abd44c7dd30df25a5846a6b3e5e6bae`.
+The new source-aligned mixed and full-W4A8 manifests carry the same base SHA;
+the reusable verifier reports zero packed-code and logical-code mismatches for
+both directories.
 
 ## Held-out software-oracle results
 
@@ -51,6 +54,8 @@ match the G32 base checkpoint; the base file SHA-256 is
 | **extended prefix mixed** | **46/196** | **0.903255** | **0.833333** | **0.204042** | **0.005287** |
 | **extended prefix all-risk** | **62/196** | **0.918487** | **1.000000** | **0.169250** | **0.005310** |
 | **source-aligned prefix all-risk** | **62/196** | **0.915216** | **1.000000** | **0.171894** | **see manifest** |
+| **source-aligned prefix mixed** | **46/196** | **0.917246** | **0.666667** | **0.173365** | **see manifest** |
+| **source-aligned full W4A8** | **0/196** | **0.104340** | **0.000000** | **1.520334** | **see manifest** |
 
 The extended mixed map improves cosine by `+0.007942` over the previous mixed
 run. The extended all-risk map improves cosine by `+0.029177`, preserves the
@@ -61,7 +66,11 @@ native-QNN accuracy claim.
 The source-aligned all-risk result is the one to take to the VM: logits cosine
 `0.915216`, top-1 agreement `1.000000`, with fixed codes from the G32 base. The
 earlier `0.918487` result used teacher-regenerated codes and must not be used for
-QNN checkpoint construction.
+QNN checkpoint construction. The source-aligned mixed run keeps the original
+46/196 A16 fallback map but reaches only `0.666667` top-1 on this held-out
+split. The full W4A8 run is a useful negative control: even after the same
+deployment-aware scale training, its cosine collapses to `0.104340`, confirming
+that the sensitive tensors cannot currently all remain A8.
 
 ## Artifacts
 
@@ -71,6 +80,15 @@ QNN checkpoint construction.
   `artifacts/p1/streaming-full-robust-prefix-allrisk-mapzp/`
 - source-aligned all-risk manifest and 28 exported scale files (VM input):
   `artifacts/p1/aligned-full-allrisk-base-g32-mapzp/`
+- source-aligned prefix mixed manifest and 28 exported scale files:
+  `artifacts/p1/aligned-full-mixed-base-g32-mapzp/`
+- source-aligned full-W4A8 manifest and 28 exported scale files (negative
+  control): `artifacts/p1/aligned-full-w4a8-base-g32-mapzp/`
+- reproducible all-A8 map generator and map:
+  `scripts/qwen3_p1_make_all_a8_map.py`,
+  `artifacts/p0/static_a8/all-a8-map.json`
+- reusable base-code verifier:
+  `scripts/verify_lpbq_base_alignment.py`
 - one-layer dry-run:
   `artifacts/p1/streaming-dryrun-enhanced/`
 
@@ -84,6 +102,11 @@ the static-scale ceiling. Deployment-aware curriculum and candidate selection
 recover most of the earlier cosine gap without rotation. For VM construction,
 the source-aligned 62/196 all-risk map is the candidate: it preserves top-1
 parity and its 196 code hashes match the authoritative G32 base.
+
+The source-aligned all-risk result remains the strongest deployment candidate:
+it preserves held-out top-1 parity while the 46/196 mixed map does not. The
+full-W4A8 result is not a candidate for device profiling until activation
+clipping/scale learning or a different static A8 contract is introduced.
 
 The result is still not a QNN deployment result: this branch does not yet have
 the native `kQNN_LPBQ_w4a8o8_G32` backend. Before calling this a device GO,
