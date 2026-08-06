@@ -24,6 +24,20 @@ struct AccuracyCase {
   std::string prompt;
 };
 
+std::string makeShortAnswerPrompt(const std::string& prompt) {
+  // Qwen3's /no_think control is also encoded by Qwen3Tokenizer's
+  // enable_thinking=false chat template.  Keep the user instruction short and
+  // explicit so the sanity suite measures answer quality rather than verbose
+  // reasoning, Markdown, or an unfinished explanation.
+  constexpr std::string_view kShortAnswerPrefix =
+      "/no_think Final answer only. No explanation. ";
+  constexpr std::string_view kNoThinkPrefix = "/no_think ";
+  if (prompt.starts_with(kNoThinkPrefix)) {
+    return std::string(kShortAnswerPrefix) + prompt.substr(kNoThinkPrefix.size());
+  }
+  return std::string(kShortAnswerPrefix) + prompt;
+}
+
 std::vector<AccuracyCase> loadAccuracyCases(const std::string& path) {
   std::ifstream stream(path);
   if (!stream.is_open()) { throw std::runtime_error("Cannot open accuracy eval file: " + path); }
@@ -313,7 +327,7 @@ MLLM_MAIN({
       return 1;
     }
     for (const auto& test : cases) {
-      auto input_tensor = tokenizer.convertMessage({.prompt = test.prompt});
+      auto input_tensor = tokenizer.convertMessage({.prompt = makeShortAnswerPrompt(test.prompt)});
       std::string generated;
       runner.reset();
       runner.generate(input_tensor["sequence"], decode_steps,

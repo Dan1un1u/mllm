@@ -149,6 +149,8 @@ inline bool qwen3Regex(const std::string& str, std::vector<std::wstring>& splitt
 
 struct Qwen3Message {
   std::string prompt;
+  // This is the Qwen3 chat-template form for enable_thinking=false.  The
+  // empty think span is intentional: it tells Qwen3 to emit only the answer.
   static inline std::string message_template =
       "<|im_start|>user\n{{{prompt}}}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n";
 };
