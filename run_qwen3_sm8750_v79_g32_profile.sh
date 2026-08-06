@@ -17,9 +17,8 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-${SCRIPT_DIR}}"
-# Keep host-side artifacts beside the repository so the complete experiment
-# tree can be moved without changing this script.  The phone-side working
-# directory remains /data/local/tmp below and is intentionally independent.
+# Host-side models/results are siblings of the repository.  This keeps the
+# baseline runnable after moving the complete llm_exp tree to another host.
 ARTIFACT_ROOT="${ARTIFACT_ROOT:-$(cd "${REPO_ROOT}/.." && pwd)}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 

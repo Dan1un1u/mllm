@@ -14,13 +14,17 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-${SCRIPT_DIR}}"
+# Host-side models/results are siblings of the repository.  This keeps the
+# baseline runnable after moving the complete llm_exp tree to another host.
+ARTIFACT_ROOT="${ARTIFACT_ROOT:-$(cd "${REPO_ROOT}/.." && pwd)}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 
-RESULTS_BASE="${RESULTS_BASE:-/home/daniuniu/llm_exp/results}"
+RESULTS_BASE="${RESULTS_BASE:-${ARTIFACT_ROOT}/results}"
 RESULT_ROOT="${RESULTS_BASE}/qwen3_sm8750_v79_${TIMESTAMP}"
 REMOTE_DIR="${REMOTE_DIR:-/data/local/tmp}"
 REMOTE_ROOT="${REMOTE_ROOT:-${REMOTE_DIR}/qwen3_sm8750_v79_profile_${TIMESTAMP}}"
 ADB_SERIAL="${ADB_SERIAL:-}"
+MODEL_ROOT="${MODEL_ROOT:-${ARTIFACT_ROOT}/models}"
 
 BUILD_ANDROID="${BUILD_ANDROID:-1}"
 PREPARE_DEVICE="${PREPARE_DEVICE:-1}"
@@ -39,11 +43,11 @@ REMOTE_CONFIG="${REMOTE_CONFIG:-config_1.7B.json}"
 
 LOCAL_BUILD_BIN="${LOCAL_BUILD_BIN:-${REPO_ROOT}/build-android-arm64-v8a-qnn/bin}"
 LOCAL_RUNNER="${LOCAL_RUNNER:-${LOCAL_BUILD_BIN}/${REMOTE_RUNNER}}"
-LOCAL_MODEL="${LOCAL_MODEL:-/home/daniuniu/llm_exp/models/output/qwen3-1.7B-lpbq-sha-sm8750-v79.bin}"
-LOCAL_TOKENIZER="${LOCAL_TOKENIZER:-/home/daniuniu/llm_exp/models/Qwen3-origin/qwen3-tokenizer.json}"
-LOCAL_CONFIG="${LOCAL_CONFIG:-/home/daniuniu/llm_exp/models/Qwen3-origin/config_1.7B.json}"
+LOCAL_MODEL="${LOCAL_MODEL:-${MODEL_ROOT}/qwen3_sm8750_v79/w4a16/qwen3-1.7B-lpbq-sha-sm8750-v79.bin}"
+LOCAL_TOKENIZER="${LOCAL_TOKENIZER:-${MODEL_ROOT}/Qwen3-origin/qwen3-tokenizer.json}"
+LOCAL_CONFIG="${LOCAL_CONFIG:-${MODEL_ROOT}/Qwen3-origin/config_1.7B.json}"
 ACCURACY_SUITE="${ACCURACY_SUITE:-${REPO_ROOT}/scripts/qwen3_sm8750_v79_accuracy.tsv}"
-SCHEMATIC_DIR="${SCHEMATIC_DIR:-/home/daniuniu/llm_exp/results/qwen3_sm8750_v79_20260713/schematics}"
+SCHEMATIC_DIR="${SCHEMATIC_DIR:-${MODEL_ROOT}/qwen3_sm8750_v79/w4a16/schematics}"
 EXPECTED_CONTEXT_SHA="${EXPECTED_CONTEXT_SHA:-727fe97725abb0d6ff4efb5fa06564746bae89339b9079c88f8d6f865acb173d}"
 
 die() {
