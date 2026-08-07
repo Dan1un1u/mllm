@@ -1,0 +1,13 @@
+# Shell/Python/build metadata must remain executable and LF-delimited when the
+# repository is checked out from Windows into WSL.  Binary model/context and
+# profiling artifacts are intentionally outside Git under ../models and
+# ../results.
+*.sh     text eol=lf
+*.py     text eol=lf
+*.cpp    text eol=lf
+*.hpp    text eol=lf
+*.json   text eol=lf
+*.tsv    text eol=lf
+*.yaml   text eol=lf
+*.yml    text eol=lf
+*.md     text eol=lf

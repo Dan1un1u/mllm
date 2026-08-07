@@ -89,7 +89,7 @@ def infer_head_counts(qhas_rows):
 
 def classification(qnn_name, qnn_type, num_q_heads, num_kv_heads):
     """Return stage, layer, head and a finer semantic detail."""
-    if qnn_name == "lm_head":
+    if qnn_name in {"lm_head", "model.lm_head"} or qnn_name.startswith("lm_head."):
         return "lm_head", None, None, "vocabulary_projection"
     if qnn_name == "model.norm":
         return "final_rmsnorm", None, None, "final_norm"
@@ -143,41 +143,46 @@ def classification(qnn_name, qnn_type, num_q_heads, num_kv_heads):
     if rest.startswith("self_attn.View."):
         return "head_merge", layer, None, "head_merge_reshape"
 
-    self_attention_name = rest.removeprefix("self_attn.")
-    kind, index = numbered_suffix(self_attention_name)
-    if kind in {"Mul", "Add", "Neg"}:
-        q_limit = 2 * num_q_heads if kind == "Mul" else num_q_heads
-        divisor = 2 if kind == "Mul" else 1
-        if index < q_limit:
-            return "q_rope", layer, index // divisor, f"q_rope_{kind.lower()}"
-        return "k_rope", layer, (index - q_limit) // divisor, f"k_rope_{kind.lower()}"
+    # Only self-attention operators can be assigned to the KV-cache stage.
+    # MLP CastType/Transpose/Slice operators have the same QNN type names but
+    # are unrelated data conversions; accepting them here silently inflated
+    # the reported KV-cache cost on host-generated reports.
+    if rest.startswith("self_attn."):
+        self_attention_name = rest.removeprefix("self_attn.")
+        kind, index = numbered_suffix(self_attention_name)
+        if kind in {"Mul", "Add", "Neg"}:
+            q_limit = 2 * num_q_heads if kind == "Mul" else num_q_heads
+            divisor = 2 if kind == "Mul" else 1
+            if index < q_limit:
+                return "q_rope", layer, index // divisor, f"q_rope_{kind.lower()}"
+            return "k_rope", layer, (index - q_limit) // divisor, f"k_rope_{kind.lower()}"
 
-    if kind == "Concat":
-        # Graph construction creates Q rotate-half concats, then K rotate-half
-        # concats, two cache concats per KV head, attention head merge, and final
-        # K/V output concats. QNN may fuse away a subset.
-        q_rope_end = num_q_heads - 1
-        k_rope_end = q_rope_end + num_kv_heads
-        cache_end = k_rope_end + 2 * num_kv_heads
-        if index <= q_rope_end:
-            return "q_rope", layer, index, "q_rotate_half_concat"
-        if index <= k_rope_end:
-            return "k_rope", layer, index - num_q_heads, "k_rotate_half_concat"
-        if index <= cache_end:
-            return "kv_cache_update", layer, (index - k_rope_end - 1) // 2, "kv_cache_concat"
-        if index == cache_end + 1:
-            return "head_merge", layer, None, "attention_head_concat"
-        return "kv_cache_update", layer, None, "kv_output_concat"
+        if kind == "Concat":
+            # Graph construction creates Q rotate-half concats, then K rotate-half
+            # concats, two cache concats per KV head, attention head merge, and final
+            # K/V output concats. QNN may fuse away a subset.
+            q_rope_end = num_q_heads - 1
+            k_rope_end = q_rope_end + num_kv_heads
+            cache_end = k_rope_end + 2 * num_kv_heads
+            if index <= q_rope_end:
+                return "q_rope", layer, index, "q_rotate_half_concat"
+            if index <= k_rope_end:
+                return "k_rope", layer, index - num_q_heads, "k_rotate_half_concat"
+            if index <= cache_end:
+                return "kv_cache_update", layer, (index - k_rope_end - 1) // 2, "kv_cache_concat"
+            if index == cache_end + 1:
+                return "head_merge", layer, None, "attention_head_concat"
+            return "kv_cache_update", layer, None, "kv_output_concat"
 
-    if kind in {"Slice", "CastType", "Transpose"}:
-        rope_slice_count = 2 * (num_q_heads + num_kv_heads)
-        if kind == "Slice" and index >= rope_slice_count:
-            head = (index - rope_slice_count) // 2
-        elif kind == "CastType":
-            head = index // 2
-        else:
-            head = index
-        return "kv_cache_update", layer, head, f"kv_cache_{kind.lower()}"
+        if kind in {"Slice", "CastType", "Transpose"}:
+            rope_slice_count = 2 * (num_q_heads + num_kv_heads)
+            if kind == "Slice" and index >= rope_slice_count:
+                head = (index - rope_slice_count) // 2
+            elif kind == "CastType":
+                head = index // 2
+            else:
+                head = index
+            return "kv_cache_update", layer, head, f"kv_cache_{kind.lower()}"
 
     return "unclassified", layer, None, rest
 

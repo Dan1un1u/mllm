@@ -17,6 +17,13 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-${SCRIPT_DIR}}"
+CONTRACT_FILE="${CONTRACT_FILE:-${REPO_ROOT}/profiles/qwen3_sm8750_v79_g32/baseline.env}"
+[[ -r "${CONTRACT_FILE}" ]] || {
+    echo "ERROR: baseline contract not found: ${CONTRACT_FILE}" >&2
+    exit 1
+}
+# shellcheck disable=SC1090
+source "${CONTRACT_FILE}"
 # Host-side models/results are siblings of the repository.  This keeps the
 # baseline runnable after moving the complete llm_exp tree to another host.
 ARTIFACT_ROOT="${ARTIFACT_ROOT:-$(cd "${REPO_ROOT}/.." && pwd)}"
@@ -30,18 +37,10 @@ ADB_SERIAL="${ADB_SERIAL:-}"
 MODEL_ROOT="${MODEL_ROOT:-${ARTIFACT_ROOT}/models}"
 ADB_BIN="${ADB_BIN:-adb}"
 
-# The standalone runner is also used by scheme-specific wrappers.  Keep the
-# actual context/profile contract explicit in the result directory rather than
-# silently labelling every run as the archived native baseline.
-PROFILE_SCHEME="${PROFILE_SCHEME:-native_g32_baseline}"
+# Keep the archived baseline identity explicit in every result.  This script
+# is intentionally not a generic scheme dispatcher.
+PROFILE_SCHEME="${BASELINE_PROFILE_SCHEME}"
 PROFILE_WRAPPER="${PROFILE_WRAPPER:-${BASH_SOURCE[0]}}"
-STREAMING_SCALE_DIR="${STREAMING_SCALE_DIR:-}"
-STREAMING_MANIFEST="${STREAMING_MANIFEST:-}"
-PRECISION_MAP="${PRECISION_MAP:-}"
-NATIVE_CONTEXT_PROVENANCE="${NATIVE_CONTEXT_PROVENANCE:-}"
-OFFLINE_LOGITS_COSINE="${OFFLINE_LOGITS_COSINE:-}"
-OFFLINE_TOP1_AGREEMENT="${OFFLINE_TOP1_AGREEMENT:-}"
-OFFLINE_LOGITS_NMSE="${OFFLINE_LOGITS_NMSE:-}"
 
 BUILD_ANDROID="${BUILD_ANDROID:-1}"
 PREPARE_DEVICE="${PREPARE_DEVICE:-1}"
@@ -53,23 +52,40 @@ AR_LEN="${AR_LEN:-32}"
 CLEAN_REMOTE="${CLEAN_REMOTE:-1}"
 PROMPT="${PROMPT:-Explain how quantized Transformer inference maps matrix, vector, and data movement work onto a mobile NPU. Discuss attention, KV cache, MLP, and the cost of quantization conversions in enough detail to continue for at least sixty-four generated tokens.}"
 
-REMOTE_RUNNER="${REMOTE_RUNNER:-mllm-qwen3-aot-runner}"
-REMOTE_MODEL="${REMOTE_MODEL:-qwen3-1.7B-lpbq-sha-g32.bin}"
-REMOTE_TOKENIZER="${REMOTE_TOKENIZER:-qwen3-tokenizer.json}"
-REMOTE_CONFIG="${REMOTE_CONFIG:-config_1.7B_g32.json}"
+REMOTE_RUNNER="${BASELINE_REMOTE_RUNNER}"
+REMOTE_MODEL="${BASELINE_REMOTE_MODEL}"
+REMOTE_TOKENIZER="${BASELINE_REMOTE_TOKENIZER}"
+REMOTE_CONFIG="${BASELINE_REMOTE_CONFIG}"
 
 LOCAL_BUILD_BIN="${LOCAL_BUILD_BIN:-${REPO_ROOT}/build-android-arm64-v8a-qnn/bin}"
-LOCAL_RUNNER="${LOCAL_RUNNER:-${LOCAL_BUILD_BIN}/${REMOTE_RUNNER}}"
-LOCAL_MODEL="${LOCAL_MODEL:-${MODEL_ROOT}/qwen3_sm8750_v79/g32/w4a16/qwen3-1.7B-lpbq-sha-g32.bin}"
-LOCAL_TOKENIZER="${LOCAL_TOKENIZER:-${MODEL_ROOT}/Qwen3-origin/qwen3-tokenizer.json}"
-LOCAL_CONFIG="${LOCAL_CONFIG:-${REPO_ROOT}/examples/qwen3_qnn_aot/config_1.7B_g32.json}"
-ACCURACY_SUITE="${ACCURACY_SUITE:-${REPO_ROOT}/scripts/qwen3_sm8750_v79_accuracy.tsv}"
-SCHEMATIC_DIR="${SCHEMATIC_DIR:-${MODEL_ROOT}/qwen3_sm8750_v79/g32/w4a16/schematics}"
-EXPECTED_CONTEXT_SHA="${EXPECTED_CONTEXT_SHA:-f637b4ddbd63478205679f40642fd24801093bb98ddf0808f13d99e3fb155d5d}"
+LOCAL_RUNNER="${LOCAL_RUNNER:-${REPO_ROOT}/${BASELINE_RUNNER_REL}}"
+LOCAL_MODEL="${LOCAL_MODEL:-${MODEL_ROOT}/${BASELINE_MODEL_REL}}"
+LOCAL_TOKENIZER="${LOCAL_TOKENIZER:-${MODEL_ROOT}/${BASELINE_TOKENIZER_REL}}"
+LOCAL_CONFIG="${LOCAL_CONFIG:-${REPO_ROOT}/${BASELINE_CONFIG_REL}}"
+ACCURACY_SUITE="${ACCURACY_SUITE:-${REPO_ROOT}/${BASELINE_ACCURACY_SUITE_REL}}"
+SCHEMATIC_DIR="${SCHEMATIC_DIR:-${MODEL_ROOT}/${BASELINE_SCHEMATIC_REL}}"
+
+# These values are fixed by the archived contract.  Changing an artifact
+# creates a new baseline; it must not silently reuse this result name.
+EXPECTED_CONTEXT_SHA="${BASELINE_CONTEXT_SHA256}"
+EXPECTED_RUNNER_SHA="${BASELINE_RUNNER_SHA256}"
+EXPECTED_TOKENIZER_SHA="${BASELINE_TOKENIZER_SHA256}"
+EXPECTED_CONFIG_SHA="${BASELINE_CONFIG_SHA256}"
+EXPECTED_ACCURACY_SUITE_SHA="${BASELINE_ACCURACY_SUITE_SHA256}"
 
 die() {
     echo "ERROR: $*" >&2
     exit 1
+}
+
+check_sha() {
+    local label="$1"
+    local path="$2"
+    local expected="$3"
+    local actual
+    actual="$(sha256sum "${path}" | awk '{print $1}')"
+    [[ "${actual}" == "${expected}" ]] \
+        || die "${label} SHA mismatch: expected ${expected}, got ${actual} (${path})"
 }
 
 [[ "${BENCHMARK_RUNS}" =~ ^[1-9][0-9]*$ ]] || die "BENCHMARK_RUNS must be a positive integer"
@@ -78,6 +94,8 @@ die() {
     || die "ACCURACY_MAX_NEW_TOKENS must be a positive integer"
 [[ "${AR_LEN}" == "32" ]] || die "This V79 context contains s1 and s32; AR_LEN must be 32"
 [[ -n "${QAIRT_SDK_ROOT:-}" ]] || die "QAIRT_SDK_ROOT is not set"
+[[ "${QAIRT_SDK_ROOT}" == */"${BASELINE_QAIRT_RELEASE}" ]] \
+    || die "QAIRT SDK release mismatch: expected ${BASELINE_QAIRT_RELEASE}, got ${QAIRT_SDK_ROOT}"
 if (( ACCURACY_MAX_NEW_TOKENS < 32 )); then
     echo "WARNING: ACCURACY_MAX_NEW_TOKENS=${ACCURACY_MAX_NEW_TOKENS} is likely to truncate answers;"
     echo "         use 64 or more for a meaningful accuracy sanity score."
@@ -110,9 +128,17 @@ for path in "${LOCAL_RUNNER}" "${LOCAL_MODEL}" "${LOCAL_TOKENIZER}" "${LOCAL_CON
     [[ -f "${path}" ]] || die "local artifact missing: ${path}"
 done
 [[ -f "${ACCURACY_SUITE}" ]] || die "accuracy suite missing: ${ACCURACY_SUITE}"
+check_sha "runner" "${LOCAL_RUNNER}" "${EXPECTED_RUNNER_SHA}"
+check_sha "tokenizer" "${LOCAL_TOKENIZER}" "${EXPECTED_TOKENIZER_SHA}"
+check_sha "config" "${LOCAL_CONFIG}" "${EXPECTED_CONFIG_SHA}"
+check_sha "accuracy suite" "${ACCURACY_SUITE}" "${EXPECTED_ACCURACY_SUITE_SHA}"
 LOCAL_CONTEXT_SHA="$(sha256sum "${LOCAL_MODEL}" | awk '{print $1}')"
 [[ "${LOCAL_CONTEXT_SHA}" == "${EXPECTED_CONTEXT_SHA}" ]] \
     || die "G32 V79 context SHA mismatch: expected ${EXPECTED_CONTEXT_SHA}, got ${LOCAL_CONTEXT_SHA}"
+check_sha "s1 schematic" "${SCHEMATIC_DIR}/model.0.s1_schematic.bin" \
+    "${BASELINE_S1_SCHEMATIC_SHA256}"
+check_sha "s32 schematic" "${SCHEMATIC_DIR}/model.0.s32_schematic.bin" \
+    "${BASELINE_S32_SCHEMATIC_SHA256}"
 
 mkdir -p "${RESULT_ROOT}/benchmark" "${RESULT_ROOT}/accuracy"
 cp "${PROFILE_WRAPPER}" "${RESULT_ROOT}/experiment_script.sh"
@@ -124,31 +150,26 @@ sha256sum "${LOCAL_RUNNER}" "${LOCAL_MODEL}" "${LOCAL_TOKENIZER}" "${LOCAL_CONFI
     "${ACCURACY_SUITE}" \
     "${SCHEMATIC_DIR}/model.0.s1_schematic.bin" "${SCHEMATIC_DIR}/model.0.s32_schematic.bin" \
     >"${RESULT_ROOT}/artifact_sha256.txt"
-if [[ -n "${STREAMING_SCALE_DIR}" && -d "${STREAMING_SCALE_DIR}" ]]; then
-    find "${STREAMING_SCALE_DIR}" -maxdepth 1 -type f -name 'layer*-lpbq-scales.safetensors' \
-        -print0 | sort -z | xargs -0 sha256sum >"${RESULT_ROOT}/streaming_scale_sha256.txt"
-fi
-for metadata_file in "${STREAMING_MANIFEST}" "${PRECISION_MAP}"; do
-    if [[ -n "${metadata_file}" && -f "${metadata_file}" ]]; then
-        sha256sum "${metadata_file}" >>"${RESULT_ROOT}/artifact_sha256.txt"
-    fi
-done
 "${ADB[@]}" shell getprop >"${RESULT_ROOT}/device_getprop.txt"
 
 {
     echo "timestamp=${TIMESTAMP}"
     echo "result_root=${RESULT_ROOT}"
     echo "capture_context=SM8750 native V79 G32"
+    echo "baseline_id=${BASELINE_ID}"
+    echo "baseline_contract=${CONTRACT_FILE}"
+    echo "baseline_source_commit=${BASELINE_SOURCE_COMMIT}"
+    echo "baseline_reference_result=${BASELINE_REFERENCE_RESULT}"
+    echo "baseline_reference_commit=${BASELINE_REFERENCE_COMMIT}"
     echo "profile_scheme=${PROFILE_SCHEME}"
     echo "profile_wrapper=${PROFILE_WRAPPER}"
-    echo "streaming_scale_dir=${STREAMING_SCALE_DIR}"
-    echo "streaming_manifest=${STREAMING_MANIFEST}"
-    echo "precision_map=${PRECISION_MAP}"
-    echo "native_context_provenance=${NATIVE_CONTEXT_PROVENANCE}"
-    echo "offline_logits_cosine=${OFFLINE_LOGITS_COSINE}"
-    echo "offline_top1_agreement=${OFFLINE_TOP1_AGREEMENT}"
-    echo "offline_logits_nmse=${OFFLINE_LOGITS_NMSE}"
     echo "context_sha256=${EXPECTED_CONTEXT_SHA}"
+    echo "runner_sha256=${EXPECTED_RUNNER_SHA}"
+    echo "tokenizer_sha256=${EXPECTED_TOKENIZER_SHA}"
+    echo "config_sha256=${EXPECTED_CONFIG_SHA}"
+    echo "accuracy_suite_sha256=${EXPECTED_ACCURACY_SUITE_SHA}"
+    echo "s1_schematic_sha256=${BASELINE_S1_SCHEMATIC_SHA256}"
+    echo "s32_schematic_sha256=${BASELINE_S32_SCHEMATIC_SHA256}"
     echo "qairt_sdk_root=${QAIRT_SDK_ROOT}"
     echo "benchmark_runs=${BENCHMARK_RUNS}"
     echo "max_new_tokens=${MAX_NEW_TOKENS}"
@@ -183,6 +204,21 @@ REMOTE_CONTEXT_SHA="$("${ADB[@]}" shell "sha256sum '${REMOTE_DIR}/${REMOTE_MODEL
     | awk '{print $1}' | tr -d '\r')"
 [[ "${REMOTE_CONTEXT_SHA}" == "${EXPECTED_CONTEXT_SHA}" ]] \
     || die "device context SHA mismatch: expected ${EXPECTED_CONTEXT_SHA}, got ${REMOTE_CONTEXT_SHA}"
+
+check_remote_sha() {
+    local label="$1"
+    local remote_path="$2"
+    local expected="$3"
+    local actual
+    actual="$("${ADB[@]}" shell "sha256sum '${remote_path}'" \
+        | awk '{print $1}' | tr -d '\r')"
+    [[ "${actual}" == "${expected}" ]] \
+        || die "device ${label} SHA mismatch: expected ${expected}, got ${actual} (${remote_path})"
+}
+
+check_remote_sha "runner" "${REMOTE_DIR}/${REMOTE_RUNNER}" "${EXPECTED_RUNNER_SHA}"
+check_remote_sha "tokenizer" "${REMOTE_DIR}/${REMOTE_TOKENIZER}" "${EXPECTED_TOKENIZER_SHA}"
+check_remote_sha "config" "${REMOTE_DIR}/${REMOTE_CONFIG}" "${EXPECTED_CONFIG_SHA}"
 "${ADB[@]}" shell "mkdir -p '${REMOTE_ROOT}'"
 "${ADB[@]}" push "${ACCURACY_SUITE}" "${REMOTE_ROOT}/accuracy_suite.tsv" >/dev/null
 
@@ -324,10 +360,9 @@ python3 "${REPO_ROOT}/scripts/qnn_profile_speed_summary.py" \
     --output "${RESULT_ROOT}/qwen3-sm8750-v79-g32-speed.json" \
     | tee "${RESULT_ROOT}/speed-summary.log"
 
-# The shared canonical report generator predates this standalone G32 script and
-# currently resolves its input files using the native G16 basename
-# qwen3-sm8750-v79-{s1,s32}.  Keep the G32 artifacts authoritative, while
-# adding result-local relative aliases only for that reader.
+# The shared report generator expects the historical qwen3-sm8750-v79-
+# {s1,s32} basename. Keep the G32 artifacts authoritative, while adding
+# result-local aliases only for that reader.
 for graph in s1 s32; do
     g32_prefix="${RESULT_ROOT}/qwen3-sm8750-v79-g32-${graph}-"
     legacy_prefix="${RESULT_ROOT}/qwen3-sm8750-v79-${graph}-"
