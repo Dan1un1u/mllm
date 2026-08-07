@@ -41,6 +41,15 @@ autotuner.log
 # Keep source model adapters tracked
 !tools/mllm-llm-benchmark/models/
 
+# QNN-AOT/profiling products belong under ../models and ../results, never at
+# the repository root.
+/qnn-profiling-data.log
+/qnn_detail_profile.txt
+/qnn_e2e_profile.csv
+/qnn_macro_profile.csv
+/qnn_profile.csv
+/qwen3_qnn_aot_sha_*.mir
+
 # Local-only benchmark driver & in-progress tests (not for commit)
 benchmarks/bench_all_models.sh
 pymllm/tests/test_model_runner_sampling.py
