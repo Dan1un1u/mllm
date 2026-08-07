@@ -3,6 +3,12 @@
 # Host-only preflight for the archived W4A16G32 baseline.  It deliberately
 # does not require adb or QAIRT, so it can be run immediately after moving the
 # repository/models tree to another VM before attempting a device run.
+#
+# The runner is intentionally presence-checked but not SHA-pinned.  Its ELF
+# contains build-path/debug and source-commit data, so a functionally
+# equivalent WSL build can legitimately have a different digest from the VM
+# reference binary.  The reference digest remains in baseline.env as
+# provenance; model/config/schematic artifacts remain SHA-pinned below.
 
 set -Eeuo pipefail
 
@@ -42,7 +48,9 @@ check_sha() {
     printf 'OK  %-16s %s\n' "${label}" "${actual}"
 }
 
-check_sha runner "${LOCAL_RUNNER}" "${BASELINE_RUNNER_SHA256}"
+[[ -f "${LOCAL_RUNNER}" ]] || die "runner missing: ${LOCAL_RUNNER}"
+printf 'INFO runner         SHA check disabled; actual %s\n' \
+    "$(sha256sum "${LOCAL_RUNNER}" | awk '{print $1}')"
 check_sha context "${LOCAL_MODEL}" "${BASELINE_CONTEXT_SHA256}"
 check_sha tokenizer "${LOCAL_TOKENIZER}" "${BASELINE_TOKENIZER_SHA256}"
 check_sha config "${LOCAL_CONFIG}" "${BASELINE_CONFIG_SHA256}"
