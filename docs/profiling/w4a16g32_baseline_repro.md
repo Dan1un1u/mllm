@@ -119,11 +119,14 @@ ADB_BIN=/mnt/d/llm_exp/mllm/scripts/adb_wsl_path_wrapper.sh \
 ADB_EXE=/mnt/c/adb/adb.exe \
 QAIRT_SDK_ROOT=/mnt/d/llm_exp/models/qualcomm-sdk/qairt/2.47.0.260601 \
 ARTIFACT_ROOT=/mnt/d/llm_exp \
+RESULTS_BASE=/home/daniuniu/llm_exp/results \
 BUILD_ANDROID=0 \
   ./run_qwen3_sm8750_v79_g32_profile_wsl.sh
 ```
 
-wrapper 不允许替换模型、config、suite 或预期 SHA；若想换产物，应创建新的
+WSL ext4 结果目录可避免 QAIRT viewer 在 `/mnt/d` drvfs 上的大型 chrometrace
+写入长时间阻塞。完成后可将 timestamped 目录整体复制到
+`/mnt/d/llm_exp/results/`。wrapper 不允许替换模型、config、suite 或预期 SHA；若想换产物，应创建新的
 branch/contract，不要继续把结果放进 `qwen3_sm8750_v79_g32_*` baseline 目录。
 
 ## 5. 脚本实际做什么
