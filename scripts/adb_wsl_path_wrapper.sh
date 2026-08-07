@@ -3,7 +3,7 @@
 # Invoke a Windows ADB binary from WSL while translating only local WSL
 # mount paths.  The profiling script deliberately keeps its host-side paths
 # in WSL form for sha256sum, QAIRT tools, and result files; Windows adb needs
-# those same paths in drive-letter form for `push`.
+# those same paths in drive-letter or WSL-UNC form for `push`/`pull`.
 
 set -Eeuo pipefail
 
@@ -15,7 +15,7 @@ ADB_EXE="${ADB_EXE:-/mnt/c/adb/adb.exe}"
 
 converted=()
 for arg in "$@"; do
-    if [[ "${arg}" == /mnt/* ]]; then
+    if [[ "${arg}" == /mnt/* || "${arg}" == /home/* ]]; then
         arg="$(wslpath -w -- "${arg}")"
     fi
     converted+=("${arg}")
