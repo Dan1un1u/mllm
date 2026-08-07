@@ -66,10 +66,25 @@ LOCAL_CONFIG="${LOCAL_CONFIG:-${REPO_ROOT}/examples/qwen3_qnn_aot/config_1.7B_g3
 ACCURACY_SUITE="${ACCURACY_SUITE:-${REPO_ROOT}/scripts/qwen3_sm8750_v79_accuracy.tsv}"
 SCHEMATIC_DIR="${SCHEMATIC_DIR:-${MODEL_ROOT}/qwen3_sm8750_v79/g32/w4a16/schematics}"
 EXPECTED_CONTEXT_SHA="${EXPECTED_CONTEXT_SHA:-f637b4ddbd63478205679f40642fd24801093bb98ddf0808f13d99e3fb155d5d}"
+EXPECTED_RUNNER_SHA="${EXPECTED_RUNNER_SHA:-}"
+EXPECTED_TOKENIZER_SHA="${EXPECTED_TOKENIZER_SHA:-}"
+EXPECTED_CONFIG_SHA="${EXPECTED_CONFIG_SHA:-}"
+EXPECTED_ACCURACY_SUITE_SHA="${EXPECTED_ACCURACY_SUITE_SHA:-}"
 
 die() {
     echo "ERROR: $*" >&2
     exit 1
+}
+
+check_optional_sha() {
+    local label="$1"
+    local path="$2"
+    local expected="$3"
+    [[ -z "${expected}" ]] && return 0
+    local actual
+    actual="$(sha256sum "${path}" | awk '{print $1}')"
+    [[ "${actual}" == "${expected}" ]] \
+        || die "${label} SHA mismatch: expected ${expected}, got ${actual} (${path})"
 }
 
 [[ "${BENCHMARK_RUNS}" =~ ^[1-9][0-9]*$ ]] || die "BENCHMARK_RUNS must be a positive integer"
@@ -110,6 +125,10 @@ for path in "${LOCAL_RUNNER}" "${LOCAL_MODEL}" "${LOCAL_TOKENIZER}" "${LOCAL_CON
     [[ -f "${path}" ]] || die "local artifact missing: ${path}"
 done
 [[ -f "${ACCURACY_SUITE}" ]] || die "accuracy suite missing: ${ACCURACY_SUITE}"
+check_optional_sha "runner" "${LOCAL_RUNNER}" "${EXPECTED_RUNNER_SHA}"
+check_optional_sha "tokenizer" "${LOCAL_TOKENIZER}" "${EXPECTED_TOKENIZER_SHA}"
+check_optional_sha "config" "${LOCAL_CONFIG}" "${EXPECTED_CONFIG_SHA}"
+check_optional_sha "accuracy suite" "${ACCURACY_SUITE}" "${EXPECTED_ACCURACY_SUITE_SHA}"
 LOCAL_CONTEXT_SHA="$(sha256sum "${LOCAL_MODEL}" | awk '{print $1}')"
 [[ "${LOCAL_CONTEXT_SHA}" == "${EXPECTED_CONTEXT_SHA}" ]] \
     || die "G32 V79 context SHA mismatch: expected ${EXPECTED_CONTEXT_SHA}, got ${LOCAL_CONTEXT_SHA}"
@@ -149,6 +168,10 @@ done
     echo "offline_top1_agreement=${OFFLINE_TOP1_AGREEMENT}"
     echo "offline_logits_nmse=${OFFLINE_LOGITS_NMSE}"
     echo "context_sha256=${EXPECTED_CONTEXT_SHA}"
+    echo "expected_runner_sha256=${EXPECTED_RUNNER_SHA}"
+    echo "expected_tokenizer_sha256=${EXPECTED_TOKENIZER_SHA}"
+    echo "expected_config_sha256=${EXPECTED_CONFIG_SHA}"
+    echo "expected_accuracy_suite_sha256=${EXPECTED_ACCURACY_SUITE_SHA}"
     echo "qairt_sdk_root=${QAIRT_SDK_ROOT}"
     echo "benchmark_runs=${BENCHMARK_RUNS}"
     echo "max_new_tokens=${MAX_NEW_TOKENS}"
