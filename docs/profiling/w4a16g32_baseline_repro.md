@@ -40,7 +40,9 @@ contract 文件是：
 profiles/qwen3_sm8750_v79_g32/baseline.env
 ```
 
-它锁定以下 SHA；任意一项不一致都不能与参考结果比较：
+它锁定以下数据产物 SHA；任意一项不一致都不能与参考结果比较。
+Android runner 的 SHA 保留为 VM 参考 provenance，但 WSL 构建的 ELF 会嵌入
+源码提交和调试路径，因此 runner 只做存在性检查，不再作为阻断 gate：
 
 | 产物 | 相对路径 | SHA-256 |
 |---|---|---|
@@ -71,13 +73,14 @@ cd "$REPO"
 python3 task.py tasks/build_android_qnn.yaml
 ```
 
-构建结束后必须重新执行第 2 节 preflight。若 runner SHA 不是 contract 中的
-`f8a00d53…`，脚本会拒绝运行；这表示源码、工具链或构建目录不是参考版本，
-应先查清原因，不要用新 runner 覆盖 baseline 结果。
+构建结束后必须重新执行第 2 节 preflight。preflight 会记录实际 runner SHA，
+但不再因它与 VM 参考值 `f8a00d53…` 不同而拒绝运行。比较速度和精度时仍要
+把实际 runner SHA、源码提交和工具链写入结果，不能把不同 runner 的结果当作
+bit-for-bit 复现。
 
 如果 context/schematic 丢失，不能从另一份 `Qwen3-1.7B-G32-base` 或 W4A8
 产物替代。应恢复与这个 SHA 对应的 G32 export/AOT 输入，再重新生成并通过
-hash gate；否则只能登记为新的实验版本。
+其余数据产物的 hash gate；否则只能登记为新的实验版本。
 
 ## 4. 真机 profiling 一键入口
 
@@ -106,7 +109,7 @@ AR_LEN=32 \
 ```
 
 如果 runner 尚未构建，把 `BUILD_ANDROID=0` 改成 `1`，脚本会先执行 Android
-QNN build，再做同一套 SHA gate。
+QNN build，再做同一套数据产物 SHA gate。
 
 WSL/Windows ADB 使用薄 wrapper，所有 profiling、HTML 和分类后处理仍由
 canonical script 完成：
