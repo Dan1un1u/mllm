@@ -190,6 +190,11 @@ if [[ "${PREPARE_DEVICE}" == "1" ]]; then
     echo "===== Prepare device ====="
     "${ADB[@]}" push "${LOCAL_BUILD_BIN}"/*.so "${REMOTE_DIR}/" >/dev/null
     "${ADB[@]}" push "${LOCAL_RUNNER}" "${REMOTE_DIR}/${REMOTE_RUNNER}" >/dev/null
+    # Windows ADB may not preserve the executable bit when pushing from a
+    # mounted WSL path.  The runner is the only pushed artifact that must be
+    # executable; shared libraries are loaded by the runner and need no mode
+    # change.
+    "${ADB[@]}" shell "chmod 755 '${REMOTE_DIR}/${REMOTE_RUNNER}'"
     "${ADB[@]}" push "${LOCAL_TOKENIZER}" "${REMOTE_DIR}/${REMOTE_TOKENIZER}" >/dev/null
     "${ADB[@]}" push "${LOCAL_CONFIG}" "${REMOTE_DIR}/${REMOTE_CONFIG}" >/dev/null
     REMOTE_CONTEXT_SHA="$("${ADB[@]}" shell "sha256sum '${REMOTE_DIR}/${REMOTE_MODEL}' 2>/dev/null" \

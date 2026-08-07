@@ -115,7 +115,8 @@ WSL/Windows ADB 使用薄 wrapper，所有 profiling、HTML 和分类后处理�
 canonical script 完成：
 
 ```bash
-ADB_BIN=adb.exe \
+ADB_BIN=/mnt/d/llm_exp/mllm/scripts/adb_wsl_path_wrapper.sh \
+ADB_EXE=/mnt/c/adb/adb.exe \
 QAIRT_SDK_ROOT=/mnt/d/llm_exp/models/qualcomm-sdk/qairt/2.47.0.260601 \
 ARTIFACT_ROOT=/mnt/d/llm_exp \
 BUILD_ANDROID=0 \
