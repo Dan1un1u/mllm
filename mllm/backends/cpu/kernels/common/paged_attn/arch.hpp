@@ -14,6 +14,7 @@
 #include <arm_neon.h>
 #include "mllm/backends/cpu/kernels/arm/math.hpp"
 #elif defined(MLLM_HOST_ARCH_X86_64) || defined(MLLM_HOST_ARCH_X86)
+#include <xmmintrin.h>
 #else
 #endif
 
