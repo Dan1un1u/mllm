@@ -720,7 +720,13 @@ bool LLMQuantRecipeMatMulPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr
   auto o_0 = *(node->outputs().begin());
 
   MLLM_RETURN_FALSE_IF_NOT(i_0->getAttr("quant_recipe"));
-  MLLM_RETURN_FALSE_IF_NOT(i_1->getAttr("quant_recipe"));
+  if (!i_1->getAttr("quant_recipe")) {
+    auto static_weight = i_1->cast_<ir::tensor::TensorValue>();
+    if (!static_weight->tensor_.name().ends_with(".r3_dense.weight")) { return false; }
+    auto weight_spec =
+        ir::linalg::QuantizationSpecLPBQ::create(-8, 7, 32, 0, 4, kUInt4, kFloat32, Tensor::nil(), Tensor::nil());
+    i_1->setAttr("quant_recipe", writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(weight_spec));
+  }
 
   auto o_spec = genSimpleQuantizationSpecAttr(writer.getContext(), o_0->cast_<ir::tensor::TensorValue>());
   o_0->setAttr("quant_recipe", o_spec);

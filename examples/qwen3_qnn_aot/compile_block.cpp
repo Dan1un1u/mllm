@@ -27,6 +27,9 @@ MLLM_MAIN({
   auto& output_context =
       Argparse::add<std::string>("-o|--output_context_name").help("Output QNN context path.");
   auto& layer = Argparse::add<int>("--layer").def(5).help("Transformer layer index; prototype contract uses Layer 5.");
+  auto& r3 = Argparse::add<std::string>("--r3")
+                 .def("none")
+                 .help("Post-RoPE R3 realization: none, dense, or fwht-graph.");
   auto& trace_seq = Argparse::add<int>("--trace_seq")
                         .def(0)
                         .help("Trace one graph (1 or 32); 0 traces both into one context.");
@@ -49,13 +52,22 @@ MLLM_MAIN({
     MLLM_ERROR_EXIT(mllm::ExitCode::kCoreError, "--trace_seq must be 0, 1, or 32");
   }
 
+  auto r3_mode = mllm::models::qwen3::sha::R3Mode::kNone;
+  if (r3.get() == "dense") {
+    r3_mode = mllm::models::qwen3::sha::R3Mode::kDense;
+  } else if (r3.get() == "fwht-graph") {
+    r3_mode = mllm::models::qwen3::sha::R3Mode::kFWHTGraph;
+  } else if (r3.get() != "none") {
+    MLLM_ERROR_EXIT(mllm::ExitCode::kCoreError, "--r3 must be none, dense, or fwht-graph");
+  }
+
   std::filesystem::create_directories(mir_dir.get());
   auto cfg = mllm::models::qwen3::Qwen3Config(model_cfg_path.get());
   auto params = mllm::load(model_path.get(), mllm::ModelFileVersion::kV2);
   mllm::models::qwen3::sha::prepareParametersForSHA(params, cfg);
   qwen3_qnn_aot::addCausalMaskParams(params);
 
-  auto model = mllm::models::qwen3::block_aot::Qwen3StandaloneBlock(cfg, layer.get());
+  auto model = mllm::models::qwen3::block_aot::Qwen3StandaloneBlock(cfg, layer.get(), r3_mode);
   model.load(params);
 
   auto qnn_env = mllm::qnn::aot::QnnAOTEnv(
@@ -75,5 +87,5 @@ MLLM_MAIN({
   if (trace_seq.get() == 0 || trace_seq.get() == 32) { trace(32); }
   if (trace_seq.get() == 0 || trace_seq.get() == 1) { trace(1); }
   qnn_env.saveContext("context.0", output_context.get());
-  mllm::print("Standalone Layer 5 SHA context written to " + output_context.get());
+  mllm::print("Standalone Layer 5 SHA context written to " + output_context.get() + " (R3=" + r3.get() + ")");
 });

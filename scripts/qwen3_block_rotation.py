@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export standalone Qwen3 Layer 5 A/B/C LPBQ-G32 rotation artifacts.
+"""Export standalone Qwen3 Layer 5 R1/R2/R3 LPBQ-G32 artifacts.
 
 The exporter intentionally keeps the calibrated activation and KV-cache QDQ
 parameters from an existing G32 checkpoint.  Only static Layer 5 parameters
@@ -7,7 +7,9 @@ are changed:
 
 * A: the original quantized Layer 5 parameters;
 * B: RMSNorm gamma folding with identity R1/R2;
-* C: RMSNorm gamma folding with normalized Sylvester-Hadamard R1/R2.
+* C: RMSNorm gamma folding with normalized Sylvester-Hadamard R1/R2;
+* D-Dense: C plus an online post-RoPE R3 dense MatMul;
+* D-FWHT-Graph: C plus an online post-RoPE seven-stage R3 FWHT graph.
 
 All matrix transforms happen on canonical float OI weights before fresh G32
 quantization and OI-to-HWIO conversion.  The emitted checkpoints contain only
@@ -40,7 +42,15 @@ from export_qwen3_lpbq_g32 import (
 VARIANT_A = "A_original"
 VARIANT_B = "B_identity_fold"
 VARIANT_C = "C_hadamard_r1_r2"
-VARIANTS = (VARIANT_A, VARIANT_B, VARIANT_C)
+VARIANT_D_DENSE = "D_dense_r3"
+VARIANT_D_FWHT_GRAPH = "D_fwht_graph_r3"
+VARIANTS = (
+    VARIANT_A,
+    VARIANT_B,
+    VARIANT_C,
+    VARIANT_D_DENSE,
+    VARIANT_D_FWHT_GRAPH,
+)
 
 LINEAR_NAMES = (
     "self_attn.q_proj",
@@ -79,6 +89,12 @@ def normalized_fwht(tensor: torch.Tensor, dim: int = -1) -> torch.Tensor:
         half *= 2
     work = work.reshape(original_shape).div_(math.sqrt(width))
     return work.movedim(-1, dim).contiguous()
+
+
+def normalized_hadamard_matrix(order: int) -> torch.Tensor:
+    """Return the normalized Sylvester matrix used by the online R3 paths."""
+
+    return normalized_fwht(torch.eye(order, dtype=torch.float32), dim=-1)
 
 
 def _headwise_output_rotation(weight: torch.Tensor, heads: int, head_dim: int) -> torch.Tensor:
@@ -289,9 +305,9 @@ def export_variants(
             "scale1_layout": "flattened [O,K/G] row-major",
             "scale2_dtype": "float32",
             "scale2_layout": "[O]",
-            "hidden_boundary": "R1 for C; baseline basis for A/B",
-            "value_cache_boundary": "per-head R2 for C; baseline basis for A/B",
-            "key_cache_boundary": "baseline basis for all variants",
+            "hidden_boundary": "R1 for C/D; baseline basis for A/B",
+            "value_cache_boundary": "per-head R2 for C/D; baseline basis for A/B",
+            "key_cache_boundary": "R3 for D; baseline basis for A/B/C",
         },
     }
 
@@ -312,7 +328,13 @@ def export_variants(
             {**common, "variant": VARIANT_A, "rotation": "none", "weights": "baseline bit-exact"},
         )
 
-    for variant, rotate in ((VARIANT_B, False), (VARIANT_C, True)):
+    candidate_variants = (
+        (VARIANT_B, False, "none"),
+        (VARIANT_C, True, "none"),
+        (VARIANT_D_DENSE, True, "dense"),
+        (VARIANT_D_FWHT_GRAPH, True, "fwht-graph"),
+    )
+    for variant, rotate, r3_mode in candidate_variants:
         if variant not in selected:
             continue
         folded = fold_layer_weights(
@@ -338,15 +360,46 @@ def export_variants(
                 **stats,
             }
 
+        if r3_mode == "dense":
+            r3 = normalized_hadamard_matrix(head_dim)
+            packed, scale1, scale2, stats = _quantize_lpbq_g32(r3, group_size)
+            r3_prefix = layer_prefix + "self_attn.r3_dense"
+            # QNN MatMul consumes a [K,O] static input. The shared LPBQ
+            # encoder emits [1,1,K,O], so remove only the singleton dims.
+            tensors[r3_prefix + ".weight"] = packed.reshape(head_dim, head_dim)
+            tensors[r3_prefix + ".scale1"] = scale1
+            tensors[r3_prefix + ".scale2"] = scale2
+            reports[r3_prefix + ".weight"] = {
+                "canonical_shape": [head_dim, head_dim],
+                "deployed_shape": [head_dim, head_dim],
+                "shared_by": f"{query_heads} Q and {kv_heads} K R3 MatMuls",
+                **stats,
+            }
+
+        if r3_mode == "fwht-graph":
+            # Encode 1/sqrt(2) exactly at the top UInt16 code. Every FWHT
+            # stage normalizes its butterfly and keeps the C Q/K encoding.
+            norm_prefix = (
+                layer_prefix
+                + "self_attn.r3_fwht_norm_constant_qdq.fake_quant"
+            )
+            tensors[norm_prefix + ".scale"] = torch.tensor(
+                [1.0 / (math.sqrt(2.0) * 65535.0)], dtype=torch.float32
+            )
+            tensors[norm_prefix + ".zero_point"] = torch.zeros(1, dtype=torch.int32)
+
         _encode_unit_rmsnorm(tensors, layer_prefix + "input_layernorm")
         _encode_unit_rmsnorm(tensors, layer_prefix + "post_attention_layernorm")
         rotation = "identity gamma fold" if not rotate else "R1=H2048/sqrt(2048), R2=H128/sqrt(128)"
+        if r3_mode != "none":
+            rotation += ", R3=H128/sqrt(128) post-RoPE Q/current-K"
         metadata = dict(base_metadata)
         metadata.update(
             {
                 "mllm.block.variant": variant,
                 "mllm.block.layer": str(layer),
                 "mllm.lpbq.rotation": rotation,
+                "mllm.block.r3_mode": r3_mode,
                 "mllm.activation_qdq": "reused baseline values; speed-only",
             }
         )
@@ -359,6 +412,8 @@ def export_variants(
                 **common,
                 "variant": variant,
                 "rotation": rotation,
+                "r3_mode": r3_mode,
+                "key_cache_boundary": "R3" if r3_mode != "none" else "baseline",
                 "rmsnorm_gamma": "folded into q/k/v and gate/up; deployed gamma encodes exact one",
                 "weights": reports,
             },

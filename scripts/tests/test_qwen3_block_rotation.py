@@ -13,7 +13,11 @@ SCRIPT_DIR = Path(__file__).resolve().parents[1]
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from qwen3_block_rotation import fold_layer_weights, normalized_fwht  # noqa: E402
+from qwen3_block_rotation import (  # noqa: E402
+    fold_layer_weights,
+    normalized_fwht,
+    normalized_hadamard_matrix,
+)
 
 
 def hadamard(order: int) -> torch.Tensor:
@@ -33,6 +37,21 @@ class Qwen3BlockRotationTest(unittest.TestCase):
         expected = torch.einsum("aib,ij->ajb", value, hadamard(8))
         actual = normalized_fwht(value, dim=1)
         torch.testing.assert_close(actual, expected, rtol=1e-12, atol=1e-12)
+
+    def test_dense_r3_matrix_matches_fwht(self) -> None:
+        torch.manual_seed(9)
+        value = torch.randn(2, 3, 8)
+        actual = value @ normalized_hadamard_matrix(8)
+        expected = normalized_fwht(value, dim=-1)
+        torch.testing.assert_close(actual, expected)
+
+    def test_r3_preserves_qk_dot_product_and_cache_layout(self) -> None:
+        torch.manual_seed(10)
+        query = torch.randn(1, 2, 3, 8)
+        key_cache = torch.randn(1, 2, 8, 7)
+        query_r3 = normalized_fwht(query, dim=-1)
+        key_cache_r3 = normalized_fwht(key_cache, dim=2)
+        torch.testing.assert_close(query_r3 @ key_cache_r3, query @ key_cache)
 
     def test_folded_linear_algebra(self) -> None:
         torch.manual_seed(11)

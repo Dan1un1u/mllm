@@ -136,6 +136,33 @@ Tensor rotateHalf(Tensor x, nn::Module* m, const std::string& qdq_name_in_pytorc
   return nn::functional::concat({ptq::QDQ(m, -x2, qdq_name_in_pytorch), x1}, -1);
 }
 
+enum class R3Mode {
+  kNone,
+  kDense,
+  kFWHTGraph,
+};
+
+inline Tensor normalizedFWHT128Graph(Tensor x, nn::Module* m, const std::string& activation_qdq) {
+  constexpr int kWidth = 128;
+  MLLM_RT_ASSERT_EQ(x.size(-1), kWidth);
+  const auto original_shape = x.shape();
+
+  auto normalize = Tensor::constant(1.f / sqrtf(2.f), kFloat32);
+  normalize = ptq::QDQ(m, normalize, "r3_fwht_norm_constant_qdq");
+
+  for (int half = 1; half < kWidth; half *= 2) {
+    auto pairs = x.view({-1, kWidth / (2 * half), 2, half}, /*ssa=*/true);
+    auto left = pairs.slice({kAll, kAll, {0, 1}, kAll}, /*ssa=*/true);
+    auto right = pairs.slice({kAll, kAll, {1, 2}, kAll}, /*ssa=*/true);
+    auto neg_right = ptq::QDQ(m, -right, activation_qdq);
+    auto sum = ptq::QDQ(m, left + right, activation_qdq);
+    auto difference = ptq::QDQ(m, left + neg_right, activation_qdq);
+    x = nn::functional::concat({sum, difference}, 2).view(original_shape, /*ssa=*/true);
+    x = ptq::QDQ(m, x.mulConstant(normalize), activation_qdq);
+  }
+  return x;
+}
+
 using vi32 = std::vector<int32_t>;
 #ifdef MLLM_QWEN3_QNN_AOT_G32
 #define QWEN3_QNN_AOT_LPBQ_IMPL aops::Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G32
@@ -210,6 +237,9 @@ class Qwen3AttentionSHA final : public nn::Module {
   std::vector<nn::Conv2D> v_projs_;
   // Single O projection remains unchanged (concatenated heads -> hidden_size)
   nn::Conv2D o_proj_;
+  // One shared static [128,128] LPBQ weight feeds the 16 Q-side and 8 K-side
+  // D-Dense MatMuls. It is registered only for the standalone R3 prototype.
+  nn::Param r3_dense_;
 
   // Per-head RMSNorm for Q
   std::vector<nn::RMSNorm> rms_norm_q_;
@@ -225,17 +255,26 @@ class Qwen3AttentionSHA final : public nn::Module {
   int num_key_value_heads_;
   int num_key_value_groups_;
   float scale_;
+  R3Mode r3_mode_ = R3Mode::kNone;
 
  public:
   Qwen3AttentionSHA() = default;
 
-  Qwen3AttentionSHA(const std::string& name, const Qwen3Config& cfg) : nn::Module(name) {
+  Qwen3AttentionSHA(const std::string& name, const Qwen3Config& cfg, R3Mode r3_mode = R3Mode::kNone)
+      : nn::Module(name), r3_mode_(r3_mode) {
     hidden_size_ = cfg.hidden_size;
     num_attention_heads_ = cfg.num_attention_heads;
     num_key_value_heads_ = cfg.num_key_value_heads;
     head_dim_ = cfg.head_dim;
     num_key_value_groups_ = num_attention_heads_ / num_key_value_heads_;
     scale_ = (1.f / sqrtf((float)head_dim_));
+    if (r3_mode_ != R3Mode::kNone && head_dim_ != 128) {
+      MLLM_ERROR_EXIT(ExitCode::kCoreError, "R3 prototype requires head_dim=128");
+    }
+    if (r3_mode_ == R3Mode::kDense) {
+      r3_dense_ = reg<nn::Param>("r3_dense", getModuleName() + ".r3_dense.weight",
+                                 Tensor::shape_t{head_dim_, head_dim_});
+    }
 
     // Register per-head Q projections
     for (int h = 0; h < num_attention_heads_; ++h) {
@@ -348,6 +387,40 @@ class Qwen3AttentionSHA final : public nn::Module {
                    "k_rope_add_0_output_qdq_h" + h_str);
     }
 
+    // Apply the same normalized Hadamard R3 after RoPE to current Q and K.
+    // Past K enters the standalone block already in the R3 basis.
+    if (r3_mode_ == R3Mode::kDense) {
+      auto r3_weight = r3_dense_();
+      for (int h = 0; h < num_attention_heads_; ++h) {
+        auto h_str = std::to_string(h);
+        query_states_per_head[h] =
+            ptq::QDQ(this, nn::functional::matmul(query_states_per_head[h], r3_weight),
+                     "q_rope_add_0_output_qdq_h" + h_str);
+      }
+      for (int h = 0; h < num_key_value_heads_; ++h) {
+        auto h_str = std::to_string(h);
+        key_states_per_head[h] =
+            ptq::QDQ(this, nn::functional::matmul(key_states_per_head[h], r3_weight),
+                     "k_rope_add_0_output_qdq_h" + h_str);
+      }
+    } else if (r3_mode_ == R3Mode::kFWHTGraph) {
+      auto query_packed = nn::functional::concat(query_states_per_head, 1);
+      query_packed = normalizedFWHT128Graph(query_packed, this, "q_rope_add_0_output_qdq_h0");
+      for (int h = 0; h < num_attention_heads_; ++h) {
+        query_states_per_head[h] = ptq::QDQ(
+            this, query_packed.slice({kAll, {h, h + 1}, kAll, kAll}, true),
+            "q_rope_add_0_output_qdq_h" + std::to_string(h));
+      }
+
+      auto key_packed = nn::functional::concat(key_states_per_head, 1);
+      key_packed = normalizedFWHT128Graph(key_packed, this, "k_rope_add_0_output_qdq_h0");
+      for (int h = 0; h < num_key_value_heads_; ++h) {
+        key_states_per_head[h] = ptq::QDQ(
+            this, key_packed.slice({kAll, {h, h + 1}, kAll, kAll}, true),
+            "k_rope_add_0_output_qdq_h" + std::to_string(h));
+      }
+    }
+
     // ========================================================================
     // KV Cache Processing per head
     // ========================================================================
@@ -452,9 +525,11 @@ class Qwen3DecoderSHA final : public nn::Module {
 
   Qwen3DecoderSHA() = default;
 
-  Qwen3DecoderSHA(const std::string& name, const Qwen3Config& cfg, int layer_idx) : nn::Module(name) {
+  Qwen3DecoderSHA(const std::string& name, const Qwen3Config& cfg, int layer_idx,
+                  R3Mode r3_mode = R3Mode::kNone)
+      : nn::Module(name) {
     layer_idx_ = layer_idx;
-    self_attn_ = reg<Qwen3AttentionSHA>("self_attn", cfg);
+    self_attn_ = reg<Qwen3AttentionSHA>("self_attn", cfg, r3_mode);
     mlp_ = reg<Qwen3MLP>("mlp", cfg);
     input_layer_norm_ = reg<nn::RMSNorm>("input_layernorm", cfg.rms_norm_eps);
     post_attention_layer_norm_ = reg<nn::RMSNorm>("post_attention_layernorm", cfg.rms_norm_eps);

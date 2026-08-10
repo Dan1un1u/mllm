@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify pre-quantization Qwen3 Layer 5 R1/R2 folding for s1 and s32."""
+"""Verify pre-quantization Qwen3 Layer 5 R1/R2/R3 algebra for s1 and s32."""
 
 from __future__ import annotations
 
@@ -50,6 +50,7 @@ def block_forward(
     kv_heads: int,
     head_dim: int,
     eps: float,
+    r3: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     batch, seq_len, _ = x.shape
     residual = x
@@ -62,6 +63,9 @@ def block_forward(
     value = value.reshape(batch, seq_len, kv_heads, head_dim).transpose(1, 2)
     query = rope(rms_norm(query, gamma_q, eps), cos, sin)
     key = rope(rms_norm(key, gamma_k, eps), cos, sin)
+    if r3:
+        query = normalized_fwht(query, dim=-1)
+        key = normalized_fwht(key, dim=-1)
     present_key = key.transpose(2, 3)
     present_value = value
 
@@ -165,7 +169,7 @@ def verify(
         )
         x_rotated = normalized_fwht(x, dim=-1)
         past_value_rotated = normalized_fwht(past_value, dim=-1)
-        actual, actual_key, actual_value = block_forward(
+        actual_c, actual_c_key, actual_c_value = block_forward(
             x_rotated,
             past_key,
             past_value_rotated,
@@ -181,22 +185,58 @@ def verify(
             head_dim=head_dim,
             eps=eps,
         )
-        expected_rotated = normalized_fwht(expected, dim=-1)
-        expected_value_rotated = normalized_fwht(expected_value, dim=-1)
-        metrics = {
+        expected_hidden_r1 = normalized_fwht(expected, dim=-1)
+        expected_value_r2 = normalized_fwht(expected_value, dim=-1)
+        metrics_c = {
+            "candidate": "C_hadamard_r1_r2",
             "seq_len": seq_len,
             "past_len": past_len,
-            "hidden_relative_l2": relative_l2(actual, expected_rotated),
-            "key_relative_l2": relative_l2(actual_key, expected_key),
-            "value_relative_l2": relative_l2(actual_value, expected_value_rotated),
-            "hidden_max_abs": float((actual - expected_rotated).abs().max()),
+            "hidden_relative_l2": relative_l2(actual_c, expected_hidden_r1),
+            "key_relative_l2": relative_l2(actual_c_key, expected_key),
+            "value_relative_l2": relative_l2(actual_c_value, expected_value_r2),
+            "hidden_max_abs": float((actual_c - expected_hidden_r1).abs().max()),
         }
-        metrics["pass"] = (
-            metrics["hidden_relative_l2"] <= 1e-4
-            and metrics["key_relative_l2"] <= 1e-4
-            and metrics["value_relative_l2"] <= 1e-4
+        metrics_c["pass"] = (
+            metrics_c["hidden_relative_l2"] <= 1e-4
+            and metrics_c["key_relative_l2"] <= 1e-4
+            and metrics_c["value_relative_l2"] <= 1e-4
         )
-        results.append(metrics)
+        results.append(metrics_c)
+
+        past_key_r3 = normalized_fwht(past_key, dim=2)
+        actual_d, actual_d_key, actual_d_value = block_forward(
+            x_rotated,
+            past_key_r3,
+            past_value_rotated,
+            cos,
+            sin,
+            rotated_weights,
+            unit_gamma,
+            unit_gamma,
+            gamma_q,
+            gamma_k,
+            query_heads=query_heads,
+            kv_heads=kv_heads,
+            head_dim=head_dim,
+            eps=eps,
+            r3=True,
+        )
+        expected_key_r3 = normalized_fwht(expected_key, dim=2)
+        metrics_d = {
+            "candidate": "D_r1_r2_r3",
+            "seq_len": seq_len,
+            "past_len": past_len,
+            "hidden_relative_l2": relative_l2(actual_d, expected_hidden_r1),
+            "key_relative_l2": relative_l2(actual_d_key, expected_key_r3),
+            "value_relative_l2": relative_l2(actual_d_value, expected_value_r2),
+            "hidden_max_abs": float((actual_d - expected_hidden_r1).abs().max()),
+        }
+        metrics_d["pass"] = (
+            metrics_d["hidden_relative_l2"] <= 1e-4
+            and metrics_d["key_relative_l2"] <= 1e-4
+            and metrics_d["value_relative_l2"] <= 1e-4
+        )
+        results.append(metrics_d)
     return {
         "schema_version": 1,
         "layer": layer,

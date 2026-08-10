@@ -62,6 +62,25 @@ void solveLinearWeight(const ir::IRContext::ptr_t& ctx, const ParameterFile::ptr
   }
 }
 
+void solveStaticMatMulWeight(const ParameterFile::ptr_t& pf, const ir::linalg::LinalgIROp::ptr_t& op) {
+  auto weight = *std::next(op->inputs().begin());
+  if (!weight->getAttr("quant_recipe")) { return; }
+  auto weight_spec = weight->getAttr("quant_recipe")->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_;
+  if (weight_spec->type != ir::linalg::QuantizationSpecType::kLPBQ || weight_spec->solved) { return; }
+
+  auto weight_tensor = weight->cast_<ir::tensor::TensorValue>()->tensor_;
+  const auto weight_name = weight_tensor.name();
+  MLLM_RT_ASSERT(weight_name.ends_with(".r3_dense.weight"));
+  MLLM_RT_ASSERT_EQ(weight_tensor.rank(), 2);
+  const auto prefix = weight_name.substr(0, weight_name.size() - std::string(".weight").size());
+  auto this_spec = std::static_pointer_cast<ir::linalg::QuantizationSpecLPBQ>(weight_spec);
+  this_spec->scale_level_0_int = pf->pull(prefix + ".scale1");
+  this_spec->scale_level_1_fp = pf->pull(prefix + ".scale2");
+  checkTypeLimits<int8_t>(weight_tensor, 0, 15);
+  checkTypeLimits<uint8_t>(this_spec->scale_level_0_int, 0, 16);
+  weight_spec->solved = true;
+}
+
 void solveRMSNormWeight(const ir::IRContext::ptr_t& ctx, const ParameterFile::ptr_t& pf,
                         const ir::linalg::LinalgIROp::ptr_t& op) {
   auto mllm_op = op->getAOp();
@@ -142,6 +161,9 @@ void recursiveSolveWeights(const std::shared_ptr<ir::IRContext>& ir_ctx, const i
     if (op->isa_<ir::linalg::Conv2DOp>()) {
       // Conv2D's Check same with Linear
       solveLinearWeight(w.getContext(), pf, op->cast_<ir::linalg::LinalgIROp>());
+    }
+    if (op->isa_<ir::linalg::MatMulOp>()) {
+      solveStaticMatMulWeight(pf, op->cast_<ir::linalg::LinalgIROp>());
     }
     if (op->isa_<ir::linalg::RMSNormOp>()) { solveRMSNormWeight(w.getContext(), pf, op->cast_<ir::linalg::LinalgIROp>()); }
     if (op->isa_<ir::linalg::EmbeddingOp>()) { solveEmbeddingWeight(w.getContext(), pf, op->cast_<ir::linalg::LinalgIROp>()); }

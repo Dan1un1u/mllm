@@ -39,8 +39,15 @@ bool QnnAOTMatMulPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& op) 
   auto qnn_op_node = QnnAOTNodeOperation::create("MatMul");
   qnn_op_node->setPackageName("qti.aisw");
 
+  bool input1_is_static_lpbq = false;
+  if (input1->getAttr("quant_recipe")) {
+    auto input1_spec =
+        input1->getAttr("quant_recipe")->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_;
+    input1_is_static_lpbq = input1_spec->type == ir::linalg::QuantizationSpecType::kLPBQ;
+  }
+
   qnn_op_node->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, input0))
-      ->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, input1))
+      ->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, input1, input1_is_static_lpbq))
       ->emplaceOutput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, output))
       ->setName(matmul_op->getAOp()->getName());
 

@@ -15,10 +15,11 @@ class Qwen3BlockRoot final : public nn::Module {
  public:
   Qwen3BlockRoot() = default;
 
-  Qwen3BlockRoot(const std::string& name, const Qwen3Config& cfg, int layer_idx) : nn::Module(name) {
+  Qwen3BlockRoot(const std::string& name, const Qwen3Config& cfg, int layer_idx, sha::R3Mode r3_mode)
+      : nn::Module(name) {
     // Keep the production-style symbol path so existing Qwen3 profiler
     // classification continues to recognize every operation as Layer 5.
-    block_ = reg<sha::Qwen3DecoderSHA>("layers." + std::to_string(layer_idx), cfg, layer_idx);
+    block_ = reg<sha::Qwen3DecoderSHA>("layers." + std::to_string(layer_idx), cfg, layer_idx, r3_mode);
   }
 
   std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>& args) override {
@@ -31,8 +32,8 @@ class Qwen3BlockRoot final : public nn::Module {
 
 class Qwen3StandaloneBlock final : public ARGeneration, public nn::Module {
  public:
-  Qwen3StandaloneBlock(const Qwen3Config& cfg, int layer_idx) {
-    root_ = reg<Qwen3BlockRoot>("model", cfg, layer_idx);
+  Qwen3StandaloneBlock(const Qwen3Config& cfg, int layer_idx, sha::R3Mode r3_mode = sha::R3Mode::kNone) {
+    root_ = reg<Qwen3BlockRoot>("model", cfg, layer_idx, r3_mode);
   }
 
   IROutput trace(const ARGenerationOutputPast& input, const ARGenerationArgs& args) override {
