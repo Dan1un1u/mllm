@@ -20,7 +20,7 @@ class Qwen3BlockRoot final : public nn::Module {
     for (int offset = 0; offset < block_count; ++offset) {
       const int layer = first_layer + offset;
       blocks_.emplace_back(
-          reg<sha::Qwen3DecoderSHA>("layers." + std::to_string(layer), cfg, layer, r3_mode));
+          reg<sha::Qwen3DecoderSHA>("layers." + std::to_string(layer), cfg, r3_mode, layer));
     }
   }
 

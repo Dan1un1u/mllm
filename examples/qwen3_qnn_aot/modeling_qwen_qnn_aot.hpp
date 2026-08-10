@@ -139,6 +139,9 @@ using vi32 = std::vector<int32_t>;
 #endif
 #define CONV2D_PROPERTY vi32{1, 1}, vi32{1, 1}, vi32{0, 0}, vi32{1, 1}, false, QWEN3_QNN_AOT_LPBQ_IMPL
 
+enum class R3Mode { kNone, kDense, kFWHTGraph };
+enum class R1BoundaryMode { kNone, kOnline };
+
 // Using Conv2D to replace Linear.
 // Conv2D Filter Weight is [1, 1, In, Out]
 // Conv2D Activation is [N, H=1, W=Seq, In]
@@ -189,6 +192,7 @@ class Qwen3Attention final : public nn::Module {
   nn::Conv2D o_proj_;
   nn::RMSNorm rms_norm_q_;
   nn::RMSNorm rms_norm_k_;
+  nn::Param r3_dense_;
   nn::CausalMask mask_;
   nn::Softmax softmax_;
 
@@ -198,11 +202,13 @@ class Qwen3Attention final : public nn::Module {
   int num_key_value_heads_;
   int num_key_value_groups_;
   float scale_;
+  R3Mode r3_mode_ = R3Mode::kNone;
 
  public:
   Qwen3Attention() = default;
 
-  Qwen3Attention(const std::string& name, const Qwen3Config& cfg) : nn::Module(name) {
+  Qwen3Attention(const std::string& name, const Qwen3Config& cfg, R3Mode r3_mode = R3Mode::kNone)
+      : nn::Module(name), r3_mode_(r3_mode) {
     hidden_size_ = cfg.hidden_size;
     num_attention_heads_ = cfg.num_attention_heads;
     num_key_value_heads_ = cfg.num_key_value_heads;
@@ -216,6 +222,13 @@ class Qwen3Attention final : public nn::Module {
     v_proj_ = reg<nn::Conv2D>("v_proj", hidden_size_, head_dim_ * num_key_value_heads_, CONV2D_PROPERTY);
     o_proj_ = reg<nn::Conv2D>("o_proj", head_dim_ * num_attention_heads_, hidden_size_, CONV2D_PROPERTY);
     // clang-format on
+    if (r3_mode_ != R3Mode::kNone && head_dim_ != 128) {
+      MLLM_ERROR_EXIT(ExitCode::kCoreError, "R3 prototype requires head_dim=128");
+    }
+    if (r3_mode_ == R3Mode::kDense) {
+      r3_dense_ = reg<nn::Param>("r3_dense", getModuleName() + ".r3_dense.weight",
+                                 Tensor::shape_t{head_dim_, head_dim_});
+    }
 
     rms_norm_q_ = reg<nn::RMSNorm>("q_norm", cfg.rms_norm_eps);
     rms_norm_k_ = reg<nn::RMSNorm>("k_norm", cfg.rms_norm_eps);
@@ -266,6 +279,16 @@ class Qwen3Attention final : public nn::Module {
                  ptq::QDQ(this, key_states * cos, "k_rope_mul_0_output_qdq")
                      + ptq::QDQ(this, rotateHalf(key_states, this, "k_rope_neg_half_qdq") * sin, "k_rope_mul_1_output_qdq"),
                  "k_rope_add_0_output_qdq");
+
+    if (r3_mode_ == R3Mode::kDense) {
+      // Reuse the post-RoPE activation calibration after the basis change. The
+      // dense R3 MatMul otherwise leaves a quantized input without an attached
+      // scale/zero-point, which makes the full-model PTQ gate reject the graph.
+      query_states = ptq::QDQ(this, nn::functional::matmul(query_states, r3_dense_()),
+                              "q_rope_add_0_output_qdq");
+      key_states = ptq::QDQ(this, nn::functional::matmul(key_states, r3_dense_()),
+                            "k_rope_add_0_output_qdq");
+    }
 
     // De-quantization and quantization again
     key_states = key_states.to(kFloat32);
@@ -324,9 +347,9 @@ class Qwen3Decoder final : public nn::Module {
 
   Qwen3Decoder() = default;
 
-  Qwen3Decoder(const std::string& name, const Qwen3Config& cfg, int layer_idx) : nn::Module(name) {
+  Qwen3Decoder(const std::string& name, const Qwen3Config& cfg, R3Mode r3_mode, int layer_idx) : nn::Module(name) {
     layer_idx_ = layer_idx;
-    self_attn_ = reg<Qwen3Attention>("self_attn", cfg);
+    self_attn_ = reg<Qwen3Attention>("self_attn", cfg, r3_mode);
     mlp_ = reg<Qwen3MLP>("mlp", cfg);
     input_layer_norm_ = reg<nn::RMSNorm>("input_layernorm", cfg.rms_norm_eps);
     post_attention_layer_norm_ = reg<nn::RMSNorm>("post_attention_layernorm", cfg.rms_norm_eps);
@@ -360,21 +383,30 @@ class Qwen3Text final : public nn::Module {
   nn::Embedding embedding_;
   nn::Param rope_sin_;
   nn::Param rope_cos_;
+  nn::Param r1_dense_;
   int32_t num_hidden_layers_;
   int32_t hidden_size_;
+  R1BoundaryMode r1_boundary_mode_ = R1BoundaryMode::kNone;
 
  public:
   Qwen3Text() = default;
 
-  Qwen3Text(const std::string& name, const Qwen3Config& cfg) : nn::Module(name) {
+  Qwen3Text(const std::string& name, const Qwen3Config& cfg, R3Mode r3_mode = R3Mode::kNone,
+            R1BoundaryMode r1_boundary_mode = R1BoundaryMode::kNone)
+      : nn::Module(name), r1_boundary_mode_(r1_boundary_mode) {
     num_hidden_layers_ = cfg.num_hidden_layers;
     hidden_size_ = cfg.hidden_size;
-    decode_blocks_ = reg<nn::ModuleListWithIdx<Qwen3Decoder>>("layers", cfg.num_hidden_layers, cfg);
+    decode_blocks_ =
+        reg<nn::ModuleListWithIdx<Qwen3Decoder>>("layers", cfg.num_hidden_layers, cfg, r3_mode);
     for (auto [idx, b] : enumerate(decode_blocks_.list())) { b.self_attn_.layer_idx_ = idx; }
     norm_ = reg<nn::RMSNorm>("norm", cfg.rms_norm_eps);
     embedding_ = reg<nn::Embedding>("embed_tokens", cfg.vocab_size, cfg.hidden_size);
     rope_sin_ = reg<nn::Param>("mllm_max_sin_embedding", "model.mllm_max_sin_embedding");
     rope_cos_ = reg<nn::Param>("mllm_max_cos_embedding", "model.mllm_max_cos_embedding");
+    if (r1_boundary_mode_ == R1BoundaryMode::kOnline) {
+      r1_dense_ = reg<nn::Param>("r1_dense", "model.r1_dense.weight",
+                                 Tensor::shape_t{hidden_size_, hidden_size_});
+    }
   }
 
   std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>& args) override {
@@ -382,6 +414,9 @@ class Qwen3Text final : public nn::Module {
 
     // X is already embedded
     auto x = embedding_(inputs[0]);
+    if (r1_boundary_mode_ == R1BoundaryMode::kOnline) {
+      x = nn::functional::matmul(x, r1_dense_());
+    }
 
     const auto& position_ids = inputs[1];
     auto causal_mask = inputs[2];
@@ -402,6 +437,9 @@ class Qwen3Text final : public nn::Module {
       values.push_back(_[2]);
     }
 
+    if (r1_boundary_mode_ == R1BoundaryMode::kOnline) {
+      x = nn::functional::matmul(x, r1_dense_());
+    }
     x = norm_(ptq::QDQ(this, x, "norm_input_qdq"));
     x = x.view({1, 1, -1, hidden_size_}, true);
 
@@ -415,12 +453,14 @@ class Qwen3Text final : public nn::Module {
 
 class Qwen3ForCausalLM : public ARGeneration, public nn::Module {
  public:
-  explicit Qwen3ForCausalLM(const Qwen3Config& cfg) : cfg(cfg) {
+  explicit Qwen3ForCausalLM(const Qwen3Config& cfg, R3Mode r3_mode = R3Mode::kNone,
+                            R1BoundaryMode r1_boundary_mode = R1BoundaryMode::kNone)
+      : cfg(cfg) {
     eos_token_id_ = cfg.end_of_text_token_id;
     max_length_ = cfg.max_cache_length;
     tie_word_embeddings_ = cfg.tie_word_embeddings;
 
-    llm = reg<Qwen3Text>("model", cfg);
+    llm = reg<Qwen3Text>("model", cfg, r3_mode, r1_boundary_mode);
 
     if (cfg.tie_word_embeddings) {
       // NOTE:

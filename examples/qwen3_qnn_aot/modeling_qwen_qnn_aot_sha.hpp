@@ -142,6 +142,16 @@ enum class R3Mode {
   kFWHTGraph,
 };
 
+// The rotated decoder stack uses one global R1 basis for every residual
+// stream. The online mode is a debug/reference boundary: it explicitly
+// applies the same R1 carrier after embedding and before the final norm. The
+// folded production mode leaves these transforms out because the exporter has
+// folded them into the boundary tensors.
+enum class R1BoundaryMode {
+  kNone,
+  kOnline,
+};
+
 inline Tensor normalizedFWHT128Graph(Tensor x, nn::Module* m, const std::string& activation_qdq) {
   constexpr int kWidth = 128;
   MLLM_RT_ASSERT_EQ(x.size(-1), kWidth);
@@ -525,8 +535,8 @@ class Qwen3DecoderSHA final : public nn::Module {
 
   Qwen3DecoderSHA() = default;
 
-  Qwen3DecoderSHA(const std::string& name, const Qwen3Config& cfg, int layer_idx,
-                  R3Mode r3_mode = R3Mode::kNone)
+  Qwen3DecoderSHA(const std::string& name, const Qwen3Config& cfg, R3Mode r3_mode,
+                  int layer_idx)
       : nn::Module(name) {
     layer_idx_ = layer_idx;
     self_attn_ = reg<Qwen3AttentionSHA>("self_attn", cfg, r3_mode);
@@ -563,21 +573,30 @@ class Qwen3TextSHA final : public nn::Module {
   nn::Embedding embedding_;
   nn::Param rope_sin_;
   nn::Param rope_cos_;
+  nn::Param r1_dense_;
   int32_t num_hidden_layers_;
   int32_t hidden_size_;
+  R1BoundaryMode r1_boundary_mode_ = R1BoundaryMode::kNone;
 
  public:
   Qwen3TextSHA() = default;
 
-  Qwen3TextSHA(const std::string& name, const Qwen3Config& cfg) : nn::Module(name) {
+  Qwen3TextSHA(const std::string& name, const Qwen3Config& cfg, R3Mode r3_mode = R3Mode::kNone,
+               R1BoundaryMode r1_boundary_mode = R1BoundaryMode::kNone)
+      : nn::Module(name), r1_boundary_mode_(r1_boundary_mode) {
     num_hidden_layers_ = cfg.num_hidden_layers;
     hidden_size_ = cfg.hidden_size;
-    decode_blocks_ = reg<nn::ModuleListWithIdx<Qwen3DecoderSHA>>("layers", cfg.num_hidden_layers, cfg);
+    decode_blocks_ =
+        reg<nn::ModuleListWithIdx<Qwen3DecoderSHA>>("layers", cfg.num_hidden_layers, cfg, r3_mode);
     for (auto [idx, b] : enumerate(decode_blocks_.list())) { b.self_attn_.layer_idx_ = idx; }
     norm_ = reg<nn::RMSNorm>("norm", cfg.rms_norm_eps);
     embedding_ = reg<nn::Embedding>("embed_tokens", cfg.vocab_size, cfg.hidden_size);
     rope_sin_ = reg<nn::Param>("mllm_max_sin_embedding", "model.mllm_max_sin_embedding");
     rope_cos_ = reg<nn::Param>("mllm_max_cos_embedding", "model.mllm_max_cos_embedding");
+    if (r1_boundary_mode_ == R1BoundaryMode::kOnline) {
+      r1_dense_ = reg<nn::Param>("r1_dense", "model.r1_dense.weight",
+                                 Tensor::shape_t{hidden_size_, hidden_size_});
+    }
   }
 
   std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>& args) override {
@@ -585,6 +604,12 @@ class Qwen3TextSHA final : public nn::Module {
 
     // X is already embedded
     auto x = embedding_(inputs[0]);
+    if (r1_boundary_mode_ == R1BoundaryMode::kOnline) {
+      // Normalized Sylvester-Hadamard R1 is symmetric, so the same carrier is
+      // its own inverse. Keep this explicit in the reference graph rather
+      // than relying on an offline boundary rewrite.
+      x = nn::functional::matmul(x, r1_dense_());
+    }
 
     const auto& position_ids = inputs[1];
     auto causal_mask = inputs[2];
@@ -605,6 +630,9 @@ class Qwen3TextSHA final : public nn::Module {
       values.push_back(_[2]);
     }
 
+    if (r1_boundary_mode_ == R1BoundaryMode::kOnline) {
+      x = nn::functional::matmul(x, r1_dense_());
+    }
     x = norm_(ptq::QDQ(this, x, "norm_input_qdq"));
     x = x.view({1, 1, -1, hidden_size_}, true);
 
@@ -618,12 +646,14 @@ class Qwen3TextSHA final : public nn::Module {
 
 class Qwen3ForCausalLM_SHA : public ARGeneration, public nn::Module {
  public:
-  explicit Qwen3ForCausalLM_SHA(const Qwen3Config& cfg) : cfg(cfg) {
+  explicit Qwen3ForCausalLM_SHA(const Qwen3Config& cfg, R3Mode r3_mode = R3Mode::kNone,
+                                R1BoundaryMode r1_boundary_mode = R1BoundaryMode::kNone)
+      : cfg(cfg) {
     eos_token_id_ = cfg.end_of_text_token_id;
     max_length_ = cfg.max_cache_length;
     tie_word_embeddings_ = cfg.tie_word_embeddings;
 
-    llm = reg<Qwen3TextSHA>("model", cfg);
+    llm = reg<Qwen3TextSHA>("model", cfg, r3_mode, r1_boundary_mode);
 
     if (cfg.tie_word_embeddings) {
       // NOTE:
