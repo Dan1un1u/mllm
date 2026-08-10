@@ -490,15 +490,18 @@ std::shared_ptr<QNNTensorWrapper> QNNTensorWrapper::createStaticTensor(const std
   return tensorWrapper;
 }
 
-void QNNTensorWrapper::alloc() {
+void QNNTensorWrapper::alloc(QNNAllocator* allocator) {
+  const bool allow_external = allocator != nullptr;
   MLLM_RT_ASSERT(dataContainer_.device() == kQNN);
 
   // if storage is not allocated, allocate it
   // or, register the existing storage to QNN(passing allocated input to QNN)
   if (!dataContainer_.impl()->ptr<void>()) { dataContainer_.alloc(); }
 
-  std::static_pointer_cast<QNNAllocator>(Context::instance().getBackend(kQNN)->allocator())
-      ->registerQnnTensorToSharedBuffer(dataContainer_.ptr<void>(), qnnTensor_);
+  if (allocator == nullptr) {
+    allocator = std::static_pointer_cast<QNNAllocator>(Context::instance().getBackend(kQNN)->allocator()).get();
+  }
+  allocator->registerQnnTensorToSharedBuffer(dataContainer_.ptr<void>(), qnnTensor_, allow_external);
 
   isAlloc_ = true;
 }

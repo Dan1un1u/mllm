@@ -15,6 +15,8 @@
 
 namespace mllm::qnn {
 
+class QNNAllocator;
+
 static const std::string QNN_Custom_Op_Package = "LLaMAPackage";
 static const std::string QNN_Context_File = "qnn_context.bin";
 
@@ -110,7 +112,11 @@ class QNNBackend final : public Backend {
 
   bool graphFinalize(const std::string& graphName);
 
-  void graphExecute(const std::string& graphName, std::vector<Tensor>& inputs, std::vector<Tensor>& outputs);
+  // Execute using this backend QNN context. The optional allocator is used
+  // to register runtime buffers in that same context; omitting it keeps the
+  // legacy global-context path intact.
+  void graphExecute(const std::string& graphName, std::vector<Tensor>& inputs, std::vector<Tensor>& outputs,
+                    QNNAllocator* tensor_allocator = nullptr);
 
   // Tensor management interfaces
   bool addTensor(const std::string& graphName, const std::string& tensorName, Qnn_TensorType_t type, const Tensor& tensor,

@@ -76,9 +76,13 @@ void QNNAllocator::free(Storage* storage) {
   qnnMemPtrSet_.erase(storage->ptr_);
 }
 
-void QNNAllocator::registerQnnTensorToSharedBuffer(void* ptr, Qnn_Tensor_t& qnn_tensor) {
-  // Make sure there has a memory that we can register to.
-  MLLM_RT_ASSERT(qnnMemPtrSet_.count(ptr));
+void QNNAllocator::registerQnnTensorToSharedBuffer(void* ptr, Qnn_Tensor_t& qnn_tensor, bool allow_external) {
+  // A tensor may be owned by another QNN allocator when multiple retrieved
+  // contexts are executed in one process. The owning allocator remains
+  // responsible for rpcmem_free; this allocator only owns the context-local
+  // QNN registration created below.
+  MLLM_RT_ASSERT(ptr != nullptr);
+  if (!allow_external) { MLLM_RT_ASSERT(qnnMemPtrSet_.count(ptr)); }
 
   // if already registered, just set the mem handle
   if (ptrToFdAndMemHandleMap_.count(ptr) > 0) {

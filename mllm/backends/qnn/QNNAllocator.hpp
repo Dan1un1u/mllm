@@ -97,7 +97,7 @@ class QNNAllocator final : public Allocator {
 
   // Sharing access in between processing domains in QNN HTP backend. Using shared buffers can
   // eliminate data copy in between client code on the host CPU and HTP accelerator.
-  void registerQnnTensorToSharedBuffer(void* ptr, Qnn_Tensor_t& qnn_tensor);
+  void registerQnnTensorToSharedBuffer(void* ptr, Qnn_Tensor_t& qnn_tensor, bool allow_external = false);
 
   void deRegisterQnnTensorFromSharedBuffer(void* ptr);
 

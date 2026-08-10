@@ -821,7 +821,7 @@ bool QNNBackend::graphFinalize(const std::string& graphName) {
   return true;
 }
 
-void QNNBackend::graphExecute(const std::string& graphName, std::vector<Tensor>& inputs, std::vector<Tensor>& outputs) {
+void QNNBackend::graphExecute(const std::string& graphName, std::vector<Tensor>& inputs, std::vector<Tensor>& outputs, QNNAllocator* tensor_allocator) {
   auto it = qnnModelIndexMap_.find(graphName);
   if (it == qnnModelIndexMap_.end()) {
     MLLM_ERROR("Graph {} not found for execution", graphName);
@@ -856,7 +856,7 @@ void QNNBackend::graphExecute(const std::string& graphName, std::vector<Tensor>&
 
     // Allocate and register the wrapper tensor with QNN allocator
     // QNNAllocator will handle registered memory descriptor when needed
-    wrapper->alloc();
+    wrapper->alloc(tensor_allocator);
     qnn_inputs.push_back(*(wrapper->getNativeTensor()));
   }
   // Prepare QNN outputs
@@ -875,7 +875,7 @@ void QNNBackend::graphExecute(const std::string& graphName, std::vector<Tensor>&
     if (!wrapper->isAlloc()) { wrapper->__setDataContainer(runtime_output); }
 
     // alloc and register qnn tensor
-    wrapper->alloc();  // QNNAllocator will handle registered memory descriptor
+    wrapper->alloc(tensor_allocator);  // QNNAllocator will handle registered memory descriptor
     qnn_outputs.push_back(*(wrapper->getNativeTensor()));
   }
   
