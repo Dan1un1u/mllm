@@ -49,3 +49,7 @@ target_include_directories(mllm-qwen3-split-aot-runner PRIVATE ${MLLM_INCLUDE_DI
 add_executable(mllm-qwen3-split-e2e-runner split_e2e_run.cpp)
 target_link_libraries(mllm-qwen3-split-e2e-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
 target_include_directories(mllm-qwen3-split-e2e-runner PRIVATE ${MLLM_INCLUDE_DIR})
+
+add_executable(mllm-qwen3-split-generation-runner split_generate_run.cpp)
+target_link_libraries(mllm-qwen3-split-generation-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+target_include_directories(mllm-qwen3-split-generation-runner PRIVATE ${MLLM_INCLUDE_DIR})
