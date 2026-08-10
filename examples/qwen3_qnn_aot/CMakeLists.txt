@@ -26,6 +26,12 @@ if(MLLM_QUALCOMM_QNN_AOT_ON_X86_ENABLE)
   target_compile_definitions(mllm-qwen3-block-aot-sha-g32-c PRIVATE MLLM_QWEN3_QNN_AOT_G32=1)
   target_link_libraries(mllm-qwen3-block-aot-sha-g32-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
   target_include_directories(mllm-qwen3-block-aot-sha-g32-c PRIVATE ${MLLM_INCLUDE_DIR})
+
+  # Qualcomm-style split graph prototype: embedding, 0-9, 10-19, 20-27+LM head.
+  add_executable(mllm-qwen3-split-aot-sha-g32-c compile_split.cpp)
+  target_compile_definitions(mllm-qwen3-split-aot-sha-g32-c PRIVATE MLLM_QWEN3_QNN_AOT_G32=1)
+  target_link_libraries(mllm-qwen3-split-aot-sha-g32-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+  target_include_directories(mllm-qwen3-split-aot-sha-g32-c PRIVATE ${MLLM_INCLUDE_DIR})
 endif()
 
 add_executable(mllm-qwen3-aot-runner aot_run.cpp)

@@ -16,6 +16,12 @@ inline void attachQDQ(mllm::Tensor& tensor, const ParamsT& params, const std::st
 }
 
 template <typename ParamsT>
+inline void attachRawQDQ(mllm::Tensor& tensor, const ParamsT& params, const std::string& prefix) {
+  tensor.attach("scale", params->pull(prefix + ".scale").impl(), true);
+  tensor.attach("zero_point", params->pull(prefix + ".zero_point").impl(), true);
+}
+
+template <typename ParamsT>
 inline mllm::models::ARGenerationOutputPast makeTraceInputs(
     int seq_len, int context_len, const mllm::models::qwen3::Qwen3Config& cfg, const ParamsT& params,
     int first_layer, int block_count = 1) {
@@ -23,7 +29,11 @@ inline mllm::models::ARGenerationOutputPast makeTraceInputs(
 
   auto hidden = mllm::Tensor::zeros({1, seq_len, cfg.hidden_size}, mllm::kUInt16);
   hidden = hidden.__unsafeSetDType(mllm::kUInt16PerTensorAsy);
-  attachQDQ(hidden, params, first_prefix + ".input_layernorm_input_qdq");
+  if (first_layer == 0) {
+    attachRawQDQ(hidden, params, "model.embed_tokens");
+  } else {
+    attachQDQ(hidden, params, first_prefix + ".input_layernorm_input_qdq");
+  }
   hidden.setName("hidden_states");
 
   auto sin = mllm::Tensor::zeros({1, seq_len, cfg.head_dim}, mllm::kUInt16);
