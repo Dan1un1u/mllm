@@ -3,9 +3,11 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <cstdint>
 #include <fstream>
 #include <numeric>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -48,12 +50,69 @@ void fillDeterministic(Tensor& tensor, uint32_t seed) {
   }
 }
 
+template <typename T>
+void dumpTensor(const std::string& path, Tensor& tensor) {
+  std::ofstream stream(path, std::ios::binary);
+  if (!stream.is_open()) { throw std::runtime_error("cannot open tensor dump: " + path); }
+  stream.write(reinterpret_cast<const char*>(tensor.ptr<T>()),
+               static_cast<std::streamsize>(tensor.numel() * sizeof(T)));
+  if (!stream.good()) { throw std::runtime_error("cannot write tensor dump: " + path); }
+}
+
+void dumpGraphTensors(const std::string& prefix, const std::string& workload, int seq_len, int past_len,
+                      std::vector<Tensor>& inputs, std::vector<Tensor>& outputs) {
+  if (prefix.empty()) { return; }
+  const auto root = prefix + "." + workload;
+  dumpTensor<uint16_t>(root + ".hidden_u16.bin", inputs[0]);
+  dumpTensor<uint16_t>(root + ".sin_u16.bin", inputs[1]);
+  dumpTensor<uint16_t>(root + ".cos_u16.bin", inputs[2]);
+  dumpTensor<uint16_t>(root + ".mask_u16.bin", inputs[3]);
+  dumpTensor<uint8_t>(root + ".past_key_u8.bin", inputs[4]);
+  dumpTensor<uint8_t>(root + ".past_value_u8.bin", inputs[5]);
+  dumpTensor<uint16_t>(root + ".hidden_out_u16.bin", outputs[0]);
+  dumpTensor<uint8_t>(root + ".present_key_u8.bin", outputs[1]);
+  dumpTensor<uint8_t>(root + ".present_value_u8.bin", outputs[2]);
+
+  std::ofstream stream(root + ".json");
+  if (!stream.is_open()) { throw std::runtime_error("cannot open tensor dump metadata: " + root + ".json"); }
+  stream << "{\n"
+         << "  \"schema_version\": 1,\n"
+         << "  \"contract\": \"qwen3_layer5_block_raw_quantized_v1\",\n"
+         << "  \"workload\": \"" << workload << "\",\n"
+         << "  \"seq_len\": " << seq_len << ",\n"
+         << "  \"past_len\": " << past_len << ",\n"
+         << "  \"context_length\": " << kContextLength << ",\n"
+         << "  \"hidden_size\": " << kHiddenSize << ",\n"
+         << "  \"head_dim\": " << kHeadDim << ",\n"
+         << "  \"kv_heads\": " << kKVHeads << ",\n"
+         << "  \"seeds\": {\n"
+         << "    \"hidden\": " << (0x5101U + seq_len) << ",\n"
+         << "    \"sin\": " << (0x5102U + seq_len) << ",\n"
+         << "    \"cos\": " << (0x5103U + seq_len) << ",\n"
+         << "    \"past_key\": " << (0x5104U + seq_len) << ",\n"
+         << "    \"past_value\": " << (0x5105U + seq_len) << "\n"
+         << "  },\n"
+         << "  \"root\": \"" << root << "\",\n"
+         << "  \"tensors\": [\n"
+         << "    {\"name\": \"hidden\", \"file_suffix\": \".hidden_u16.bin\", \"dtype\": \"uint16\", \"shape\": [1, " << seq_len << ", " << kHiddenSize << "]},\n"
+         << "    {\"name\": \"sin\", \"file_suffix\": \".sin_u16.bin\", \"dtype\": \"uint16\", \"shape\": [1, " << seq_len << ", " << kHeadDim << "]},\n"
+         << "    {\"name\": \"cos\", \"file_suffix\": \".cos_u16.bin\", \"dtype\": \"uint16\", \"shape\": [1, " << seq_len << ", " << kHeadDim << "]},\n"
+         << "    {\"name\": \"mask\", \"file_suffix\": \".mask_u16.bin\", \"dtype\": \"uint16\", \"shape\": [1, 1, " << seq_len << ", " << kContextLength << "]},\n"
+         << "    {\"name\": \"past_key\", \"file_suffix\": \".past_key_u8.bin\", \"dtype\": \"uint8\", \"shape\": [1, " << kKVHeads << ", " << kHeadDim << ", " << past_len << "]},\n"
+         << "    {\"name\": \"past_value\", \"file_suffix\": \".past_value_u8.bin\", \"dtype\": \"uint8\", \"shape\": [1, " << kKVHeads << ", " << past_len << ", " << kHeadDim << "]},\n"
+         << "    {\"name\": \"hidden_out\", \"file_suffix\": \".hidden_out_u16.bin\", \"dtype\": \"uint16\", \"shape\": [1, " << seq_len << ", " << kHiddenSize << "]},\n"
+         << "    {\"name\": \"present_key\", \"file_suffix\": \".present_key_u8.bin\", \"dtype\": \"uint8\", \"shape\": [1, " << kKVHeads << ", " << kHeadDim << ", " << seq_len << "]},\n"
+         << "    {\"name\": \"present_value\", \"file_suffix\": \".present_value_u8.bin\", \"dtype\": \"uint8\", \"shape\": [1, " << kKVHeads << ", " << seq_len << ", " << kHeadDim << "]}\n"
+         << "  ]\n"
+         << "}\n";
+}
+
 double percentile(const std::vector<int64_t>& sorted, double quantile) {
   const auto index = static_cast<size_t>(std::ceil(quantile * static_cast<double>(sorted.size()))) - 1;
   return static_cast<double>(sorted[std::min(index, sorted.size() - 1)]);
 }
 
-TimingResult runGraph(int seq_len, int warmup, int iterations) {
+TimingResult runGraph(int seq_len, int warmup, int iterations, const std::string& dump_prefix) {
   const std::string workload = seq_len == 1 ? "s1_decode" : "s32_prefill_chunk";
   const std::string graph = "model.0.s" + std::to_string(seq_len);
   const int past_len = kContextLength - seq_len;
@@ -96,6 +155,7 @@ TimingResult runGraph(int seq_len, int warmup, int iterations) {
   auto sorted = samples;
   std::sort(sorted.begin(), sorted.end());
   const double mean = std::accumulate(samples.begin(), samples.end(), 0.0) / static_cast<double>(samples.size());
+  dumpGraphTensors(dump_prefix, workload, seq_len, past_len, inputs, outputs);
   return {
       .workload = workload,
       .graph = graph,
@@ -158,6 +218,8 @@ MLLM_MAIN({
   auto& output = Argparse::add<std::string>("-o|--output").def("qwen3_layer5_block_timing.json");
   auto& variant = Argparse::add<std::string>("--variant").def("unknown");
   Argparse::parse(argc, argv);
+  const auto* dump_prefix_env = std::getenv("MLLM_QWEN3_DUMP_PREFIX");
+  const std::string dump_prefix = dump_prefix_env == nullptr ? "" : dump_prefix_env;
 
   if (help.isSet()) {
     Argparse::printHelp();
@@ -173,9 +235,11 @@ MLLM_MAIN({
 
   mllm::initQnnBackend(context.get());
   std::vector<TimingResult> results;
-  if (graph.get() == "s1" || graph.get() == "both") { results.push_back(runGraph(1, warmup.get(), iterations.get())); }
+  if (graph.get() == "s1" || graph.get() == "both") {
+    results.push_back(runGraph(1, warmup.get(), iterations.get(), dump_prefix));
+  }
   if (graph.get() == "s32" || graph.get() == "both") {
-    results.push_back(runGraph(32, warmup.get(), iterations.get()));
+    results.push_back(runGraph(32, warmup.get(), iterations.get(), dump_prefix));
   }
   writeJson(output.get(), context.get(), variant.get(), warmup.get(), iterations.get(), results);
   for (const auto& result : results) {
