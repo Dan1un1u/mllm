@@ -17,12 +17,13 @@ inline void attachQDQ(mllm::Tensor& tensor, const ParamsT& params, const std::st
 
 template <typename ParamsT>
 inline mllm::models::ARGenerationOutputPast makeTraceInputs(
-    int seq_len, int context_len, const mllm::models::qwen3::Qwen3Config& cfg, const ParamsT& params, int layer_idx) {
-  const std::string layer = "model.layers." + std::to_string(layer_idx);
+    int seq_len, int context_len, const mllm::models::qwen3::Qwen3Config& cfg, const ParamsT& params,
+    int first_layer, int block_count = 1) {
+  const std::string first_prefix = "model.layers." + std::to_string(first_layer);
 
   auto hidden = mllm::Tensor::zeros({1, seq_len, cfg.hidden_size}, mllm::kUInt16);
   hidden = hidden.__unsafeSetDType(mllm::kUInt16PerTensorAsy);
-  attachQDQ(hidden, params, layer + ".input_layernorm_input_qdq");
+  attachQDQ(hidden, params, first_prefix + ".input_layernorm_input_qdq");
   hidden.setName("hidden_states");
 
   auto sin = mllm::Tensor::zeros({1, seq_len, cfg.head_dim}, mllm::kUInt16);
@@ -41,22 +42,28 @@ inline mllm::models::ARGenerationOutputPast makeTraceInputs(
   causal_mask.attach("zero_point", params->pull("causal_mask.zero_point").impl(), true);
   causal_mask.setName("causal_mask");
 
-  auto past_key = mllm::Tensor::zeros(
-      {1, cfg.num_key_value_heads, cfg.head_dim, context_len - seq_len}, mllm::kUInt8);
-  past_key = past_key.__unsafeSetDType(mllm::kUInt8PerTensorSym);
-  attachQDQ(past_key, params, layer + ".self_attn.k_cast_to_int8_qdq");
-  past_key.setName("past_key");
+  mllm::models::ARGenerationOutputPast inputs = {
+      {"hidden_states", hidden}, {"sin", sin}, {"cos", cos}, {"causal_mask", causal_mask}};
+  for (int offset = 0; offset < block_count; ++offset) {
+    const int layer = first_layer + offset;
+    const std::string prefix = "model.layers." + std::to_string(layer);
+    const auto suffix = block_count == 1 ? std::string() : "_" + std::to_string(layer);
 
-  auto past_value = mllm::Tensor::zeros(
-      {1, cfg.num_key_value_heads, context_len - seq_len, cfg.head_dim}, mllm::kUInt8);
-  past_value = past_value.__unsafeSetDType(mllm::kUInt8PerTensorSym);
-  attachQDQ(past_value, params, layer + ".self_attn.v_cast_to_int8_qdq");
-  past_value.setName("past_value");
+    auto past_key = mllm::Tensor::zeros(
+        {1, cfg.num_key_value_heads, cfg.head_dim, context_len - seq_len}, mllm::kUInt8);
+    past_key = past_key.__unsafeSetDType(mllm::kUInt8PerTensorSym);
+    attachQDQ(past_key, params, prefix + ".self_attn.k_cast_to_int8_qdq");
+    past_key.setName("past_key" + suffix);
+    inputs["past_key" + suffix] = past_key;
 
-  return {
-      {"hidden_states", hidden}, {"sin", sin},           {"cos", cos},
-      {"causal_mask", causal_mask}, {"past_key", past_key}, {"past_value", past_value},
-  };
+    auto past_value = mllm::Tensor::zeros(
+        {1, cfg.num_key_value_heads, context_len - seq_len, cfg.head_dim}, mllm::kUInt8);
+    past_value = past_value.__unsafeSetDType(mllm::kUInt8PerTensorSym);
+    attachQDQ(past_value, params, prefix + ".self_attn.v_cast_to_int8_qdq");
+    past_value.setName("past_value" + suffix);
+    inputs["past_value" + suffix] = past_value;
+  }
+  return inputs;
 }
 
 }  // namespace qwen3_qnn_aot::block
