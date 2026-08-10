@@ -41,3 +41,7 @@ target_include_directories(mllm-qwen3-aot-runner PRIVATE ${MLLM_INCLUDE_DIR})
 add_executable(mllm-qwen3-block-aot-runner block_aot_run.cpp)
 target_link_libraries(mllm-qwen3-block-aot-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
 target_include_directories(mllm-qwen3-block-aot-runner PRIVATE ${MLLM_INCLUDE_DIR})
+
+add_executable(mllm-qwen3-split-aot-runner split_aot_run.cpp)
+target_link_libraries(mllm-qwen3-split-aot-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+target_include_directories(mllm-qwen3-split-aot-runner PRIVATE ${MLLM_INCLUDE_DIR})
