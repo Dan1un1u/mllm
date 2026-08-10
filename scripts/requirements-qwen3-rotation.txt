@@ -1,0 +1,5 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch==2.13.0+cpu
+safetensors==0.8.0
+numpy==2.2.6

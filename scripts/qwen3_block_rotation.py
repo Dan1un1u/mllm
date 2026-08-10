@@ -19,10 +19,10 @@ the tensors needed to compile the standalone block.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import shutil
+import sys
 import time
 from pathlib import Path
 from typing import Iterable
@@ -36,6 +36,14 @@ from export_qwen3_lpbq_g32 import (
     _quantize_lpbq_g32,
     _read_source_tensor,
     _source_files,
+)
+
+from qwen3_rotation_manifest import (
+    build_export_manifest_v2,
+    build_input_records,
+    build_provenance,
+    finalize_manifest,
+    tensor_sha256,
 )
 
 
@@ -222,32 +230,28 @@ def _clone_tensors(tensors: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     return {key: value.clone().contiguous() for key, value in tensors.items()}
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _write_variant(
     output_root: Path,
     variant: str,
     tensors: dict[str, torch.Tensor],
     metadata: dict[str, str],
     manifest: dict[str, object],
-) -> None:
+    *,
+    inputs: dict[str, object],
+    provenance: dict[str, object],
+) -> dict[str, object]:
     variant_dir = output_root / variant
     variant_dir.mkdir(parents=True, exist_ok=True)
     checkpoint = variant_dir / "model.safetensors"
     save_file(tensors, str(checkpoint), metadata=metadata)
-    manifest["checkpoint"] = str(checkpoint)
-    manifest["checkpoint_sha256"] = _sha256(checkpoint)
-    manifest["tensor_count"] = len(tensors)
+    manifest_v2 = build_export_manifest_v2(
+        manifest, checkpoint, inputs=inputs, provenance=provenance
+    )
     (variant_dir / "export_manifest.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+        json.dumps(manifest_v2, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    return manifest_v2
 
 
 def export_variants(
@@ -285,12 +289,24 @@ def export_variants(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     started = time.perf_counter()
+    source_files = _source_files(source_model)
+    inputs = build_input_records(source_model, source_files, base_quant_checkpoint)
+    repo_root = Path(__file__).resolve().parents[1]
+    provenance = build_provenance(
+        repo_root,
+        sys.argv,
+        (
+            Path(__file__),
+            Path(__file__).with_name("export_qwen3_lpbq_g32.py"),
+            Path(__file__).with_name("qwen3_rotation_manifest.py"),
+        ),
+    )
     source = _load_source_layer(source_model, layer)
     base_tensors, base_metadata = _load_base_subset(base_quant_checkpoint, layer)
     layer_prefix = f"model.layers.{layer}."
 
     common = {
-        "schema_version": 1,
+        "schema_version": 2,
         "model": "Qwen3-1.7B",
         "layer": layer,
         "source_model": str(source_model),
@@ -298,6 +314,12 @@ def export_variants(
         "graph_style": "SHA per-head Q/K/V projections",
         "activation_qdq": "reused bit-exact from baseline; speed-only experiment",
         "group_size": group_size,
+        "dimensions": {
+            "hidden_size": hidden_size,
+            "head_dim": head_dim,
+            "query_heads": query_heads,
+            "kv_heads": kv_heads,
+        },
         "contract": {
             "weight_dtype": "int8_carrier_uint4",
             "weight_layout": "HWIO [1,1,K,O]",
@@ -311,6 +333,7 @@ def export_variants(
         },
     }
 
+    variant_manifests: list[dict[str, object]] = []
     if VARIANT_A in selected:
         metadata = dict(base_metadata)
         metadata.update(
@@ -320,12 +343,16 @@ def export_variants(
                 "mllm.lpbq.rotation": "none",
             }
         )
-        _write_variant(
-            output_dir,
-            VARIANT_A,
-            _clone_tensors(base_tensors),
-            metadata,
-            {**common, "variant": VARIANT_A, "rotation": "none", "weights": "baseline bit-exact"},
+        variant_manifests.append(
+            _write_variant(
+                output_dir,
+                VARIANT_A,
+                _clone_tensors(base_tensors),
+                metadata,
+                {**common, "variant": VARIANT_A, "rotation": "none", "weights": "baseline bit-exact"},
+                inputs=inputs,
+                provenance=provenance,
+            )
         )
 
     candidate_variants = (
@@ -357,6 +384,13 @@ def export_variants(
             reports[weight_key] = {
                 "canonical_shape": list(canonical_weight.shape),
                 "deployed_shape": list(packed.shape),
+                "source_tensor_sha256": tensor_sha256(source[relative_name]),
+                "canonical_tensor_sha256": tensor_sha256(canonical_weight),
+                "deployed_tensor_names": [
+                    weight_key,
+                    projection_prefix + ".scale1",
+                    projection_prefix + ".scale2",
+                ],
                 **stats,
             }
 
@@ -373,6 +407,12 @@ def export_variants(
                 "canonical_shape": [head_dim, head_dim],
                 "deployed_shape": [head_dim, head_dim],
                 "shared_by": f"{query_heads} Q and {kv_heads} K R3 MatMuls",
+                "canonical_tensor_sha256": tensor_sha256(r3),
+                "deployed_tensor_names": [
+                    r3_prefix + ".weight",
+                    r3_prefix + ".scale1",
+                    r3_prefix + ".scale2",
+                ],
                 **stats,
             }
 
@@ -403,27 +443,51 @@ def export_variants(
                 "mllm.activation_qdq": "reused baseline values; speed-only",
             }
         )
-        _write_variant(
-            output_dir,
-            variant,
-            tensors,
-            metadata,
-            {
-                **common,
-                "variant": variant,
-                "rotation": rotation,
-                "r3_mode": r3_mode,
-                "key_cache_boundary": "R3" if r3_mode != "none" else "baseline",
-                "rmsnorm_gamma": "folded into q/k/v and gate/up; deployed gamma encodes exact one",
-                "weights": reports,
-            },
+        variant_manifests.append(
+            _write_variant(
+                output_dir,
+                variant,
+                tensors,
+                metadata,
+                {
+                    **common,
+                    "variant": variant,
+                    "rotation": rotation,
+                    "r3_mode": r3_mode,
+                    "key_cache_boundary": "R3" if r3_mode != "none" else "baseline",
+                    "rmsnorm_gamma": "folded into q/k/v and gate/up; deployed gamma encodes exact one",
+                    "weights": reports,
+                },
+                inputs=inputs,
+                provenance=provenance,
+            )
         )
 
-    root_manifest = {
-        **common,
-        "variants": list(selected),
-        "elapsed_seconds": time.perf_counter() - started,
-    }
+    root_manifest = finalize_manifest(
+        {
+            "schema_version": 2,
+            "manifest_kind": "mllm.qwen3.rotation.experiment",
+            "model": common["model"],
+            "layer": layer,
+            "dimensions": common["dimensions"],
+            "inputs": inputs,
+            "provenance": provenance,
+            "variants": [
+                {
+                    "name": item["variant"],
+                    "manifest_id": item["manifest_id"],
+                    "manifest_path": str(
+                        (
+                            output_dir / str(item["variant"]) / "export_manifest.json"
+                        ).resolve()
+                    ),
+                    "checkpoint_sha256": item["artifact"]["checkpoint"]["sha256"],
+                }
+                for item in variant_manifests
+            ],
+            "elapsed_seconds": time.perf_counter() - started,
+        }
+    )
     (output_dir / "experiment_manifest.json").write_text(
         json.dumps(root_manifest, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
