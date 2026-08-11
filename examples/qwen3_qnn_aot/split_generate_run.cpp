@@ -97,7 +97,8 @@ struct PartIO {
 
 class SplitGenerator {
  public:
-  SplitGenerator(const std::vector<std::string>& contexts) {
+  SplitGenerator(const std::vector<std::string>& contexts, std::string boundary_dump_dir = {})
+      : boundary_dump_dir_(std::move(boundary_dump_dir)) {
     backends_.reserve(contexts.size());
     for (const auto& path : contexts) {
       auto backend = std::make_shared<QNNBackend>();
@@ -123,9 +124,19 @@ class SplitGenerator {
     fillRopeAndMask(sin_, cos_, mask_, position, past_tokens_);
 
     execute(0, "model.0.s1", part1_inputs_, part1_outputs_);
+    dumpU16("part1_hidden_u16.bin", part1_outputs_.at(0));
     execute(1, "model.0.s1", part2_inputs_.inputs, part2_inputs_.outputs);
+    dumpU16("part2_hidden_u16.bin", part2_outputs_.at(0));
+    // Each split graph owns its graph tensor wrappers.  Rebind the next
+    // graph's hidden input to the previous graph's output storage explicitly;
+    // otherwise the independent preallocated hidden2/hidden3 buffers would
+    // contain no part-to-part residual stream.
+    part3_inputs_.inputs.at(0) = part2_outputs_.at(0);
     execute(2, "model.0.s1", part3_inputs_.inputs, part3_inputs_.outputs);
+    dumpU16("part3_hidden_u16.bin", part3_outputs_.at(0));
+    part4_inputs_.inputs.at(0) = part3_outputs_.at(0);
     execute(3, "model.0.s1", part4_inputs_.inputs, part4_inputs_.outputs);
+    dumpU16("part4_logits_u16.bin", part4_outputs_.at(0));
 
     appendCaches(part2_inputs_, part2_outputs_, 10, past_tokens_);
     appendCaches(part3_inputs_, part3_outputs_, 10, past_tokens_);
@@ -146,7 +157,24 @@ class SplitGenerator {
                  part4_outputs_.at(0).numel() * sizeof(uint16_t));
   }
 
+  void dumpLogits(const std::string& path) const {
+    if (path.empty()) { return; }
+    dumpU16Path(path, part4_outputs_.at(0));
+  }
+
  private:
+  static void dumpU16Path(const std::string& path, const Tensor& tensor) {
+    std::ofstream stream(path, std::ios::binary);
+    if (!stream.is_open()) { throw std::runtime_error("cannot open tensor dump: " + path); }
+    stream.write(reinterpret_cast<const char*>(tensor.ptr<uint16_t>()),
+                 static_cast<std::streamsize>(tensor.numel() * sizeof(uint16_t)));
+    if (!stream.good()) { throw std::runtime_error("failed to write tensor dump: " + path); }
+  }
+
+  void dumpU16(const std::string& name, const Tensor& tensor) const {
+    if (boundary_dump_dir_.empty()) { return; }
+    dumpU16Path(boundary_dump_dir_ + "/" + name, tensor);
+  }
   static void appendCaches(PartIO& io, const std::vector<Tensor>& outputs, int block_count, int past_tokens) {
     for (int i = 0; i < block_count; ++i) {
       appendKey(io.key_inputs.at(static_cast<size_t>(i)), outputs.at(static_cast<size_t>(1 + i)),
@@ -226,6 +254,7 @@ class SplitGenerator {
   Tensor sin_;
   Tensor cos_;
   Tensor mask_;
+  std::string boundary_dump_dir_;
   int past_tokens_ = 0;
 };
 
@@ -241,6 +270,12 @@ void writeJson(const std::string& path, const std::vector<int64_t>& prompt_token
          << "  \"numerical_oracle\": \"not_run\",\n"
          << "  \"performance_gate\": \"not_run\",\n"
          << "  \"prompt_token_count\": " << prompt_tokens.size() << ",\n"
+         << "  \"prompt_tokens\": [";
+  for (size_t i = 0; i < prompt_tokens.size(); ++i) {
+    if (i != 0) { stream << ", "; }
+    stream << prompt_tokens[i];
+  }
+  stream << "],\n"
          << "  \"generated_tokens\": [";
   for (size_t i = 0; i < generated_tokens.size(); ++i) {
     if (i != 0) { stream << ", "; }
@@ -269,6 +304,8 @@ MLLM_MAIN({
   auto& prompt = Argparse::add<std::string>("--prompt").def("hello").help("User prompt.");
   auto& max_new_tokens = Argparse::add<int>("--max_new_tokens").def(1);
   auto& output = Argparse::add<std::string>("-o|--output").def("qwen3_split_generation_probe.json");
+  auto& logits_dump = Argparse::add<std::string>("--logits_dump").def("").help("Optional raw uint16 final logits dump.");
+  auto& boundary_dump_dir = Argparse::add<std::string>("--boundary_dump_dir").def("").help("Optional directory for final-token part hidden dumps.");
   Argparse::parse(argc, argv);
   if (help.isSet()) {
     Argparse::printHelp();
@@ -291,7 +328,7 @@ MLLM_MAIN({
     MLLM_ERROR_EXIT(mllm::ExitCode::kCoreError, "prompt token count must be in [1, 1022]");
   }
 
-  SplitGenerator generator({part1.get(), part2.get(), part3.get(), part4.get()});
+  SplitGenerator generator({part1.get(), part2.get(), part3.get(), part4.get()}, boundary_dump_dir.get());
   std::vector<uint32_t> generated_tokens;
   std::vector<int64_t> token_us;
   uint32_t next_token = 0;
@@ -313,6 +350,7 @@ MLLM_MAIN({
   }
   fmt::print("\n");
   writeJson(output.get(), prompt_tokens, generated_tokens, token_us, generator.hiddenHash(), generator.logitsHash());
+  generator.dumpLogits(logits_dump.get());
   fmt::print("wrote {} (probe-only; numerical and 5% performance gates unchanged)\n", output.get());
   return 0;
 });
