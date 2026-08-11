@@ -237,15 +237,18 @@ def block_forward(
     ]
     if apply_r3:
         r3_weight = checkpoint.lpbq_weight(ATTN + ".r3_dense")
+        # QNN uses matmul(x, R3), not a linear layer with an implicit
+        # transpose.  LPBQ quantization makes the carrier only approximately
+        # symmetric, so preserve the deployed right-multiplication contract.
         query_heads_values = [
             checkpoint.qdq(
-                F.linear(item, r3_weight), f"{ATTN}.q_rope_add_0_output_qdq_h{h}"
+                torch.matmul(item, r3_weight), f"{ATTN}.q_rope_add_0_output_qdq_h{h}"
             )
             for h, item in enumerate(query_heads_values)
         ]
         key_heads_values = [
             checkpoint.qdq(
-                F.linear(item, r3_weight), f"{ATTN}.k_rope_add_0_output_qdq_h{h}"
+                torch.matmul(item, r3_weight), f"{ATTN}.k_rope_add_0_output_qdq_h{h}"
             )
             for h, item in enumerate(key_heads_values)
         ]

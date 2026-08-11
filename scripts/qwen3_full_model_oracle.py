@@ -249,15 +249,19 @@ def layer_forward(
         for h in range(kv_heads)
     ]
     r3 = checkpoint.lpbq_weight(attn + ".r3_dense")
+    # The deployed graph registers R3 as an nn::Param and applies
+    # matmul(x, R3), i.e. right multiplication.  F.linear(x, R3) would
+    # silently use R3.T; the quantized LPBQ carrier is only approximately
+    # symmetric, so the distinction matters for a faithful oracle.
     query_heads_values = [
         checkpoint.qdq(
-            F.linear(item, r3), f"{attn}.q_rope_add_0_output_qdq_h{h}"
+            torch.matmul(item, r3), f"{attn}.q_rope_add_0_output_qdq_h{h}"
         )
         for h, item in enumerate(query_heads_values)
     ]
     key_heads_values = [
         checkpoint.qdq(
-            F.linear(item, r3), f"{attn}.k_rope_add_0_output_qdq_h{h}"
+            torch.matmul(item, r3), f"{attn}.k_rope_add_0_output_qdq_h{h}"
         )
         for h, item in enumerate(key_heads_values)
     ]
