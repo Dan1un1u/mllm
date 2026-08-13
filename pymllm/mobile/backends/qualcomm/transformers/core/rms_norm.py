@@ -16,6 +16,12 @@ class QRMSNorm(nn.Module):
         if isinstance(normalized_shape, int):
             normalized_shape = (normalized_shape,)
 
+        if quant_bits not in (8, 16):
+            raise ValueError("QRMSNorm supports only 8-bit or 16-bit weights")
+
+        quant_max = 2**quant_bits - 1
+        quant_eps = 0.0001 / quant_max
+
         self.weight = nn.Parameter(torch.ones(normalized_shape))
 
         # Quantization configuration for Weight
@@ -23,12 +29,12 @@ class QRMSNorm(nn.Module):
             observer=MinMaxObserver.with_args(
                 qscheme=torch.per_tensor_affine,
                 dtype=torch.qint32,
-                eps=0.0001 / 65535,
+                eps=quant_eps,
                 quant_min=0,
-                quant_max=2 ** (quant_bits) - 1,
+                quant_max=quant_max,
             ),
             quant_min=0,
-            quant_max=2 ** (quant_bits) - 1,
+            quant_max=quant_max,
             dtype=torch.qint32,
             qscheme=torch.per_tensor_affine,
         )

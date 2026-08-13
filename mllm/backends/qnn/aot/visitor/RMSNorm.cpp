@@ -47,11 +47,25 @@ bool QnnAOTRMSNormPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& op)
 
   auto i_0 = op->inputs().front()->cast_<ir::tensor::TensorValue>();
   auto o_0 = op->outputs().front()->cast_<ir::tensor::TensorValue>();
-  auto input_quant_spec = std::static_pointer_cast<ir::linalg::QuantizationSpecAsymPerTensor>(
-      i_0->getAttr("quant_recipe")->cast_<mllm::ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_);
-  auto output_quant_spec = std::static_pointer_cast<ir::linalg::QuantizationSpecAsymPerTensor>(
-      o_0->getAttr("quant_recipe")->cast_<mllm::ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_);
-  const bool needs_a8_bridge = input_quant_spec->quant_to_type == kUInt8 || output_quant_spec->quant_to_type == kUInt8;
+  auto input_spec = i_0->getAttr("quant_recipe")->cast_<mllm::ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_;
+  auto output_spec = o_0->getAttr("quant_recipe")->cast_<mllm::ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_;
+  MLLM_RETURN_FALSE_IF_NOT(input_spec->type == ir::linalg::QuantizationSpecType::kAsymPerTensor);
+  MLLM_RETURN_FALSE_IF_NOT(output_spec->type == ir::linalg::QuantizationSpecType::kAsymPerTensor);
+  auto input_quant_spec = std::static_pointer_cast<ir::linalg::QuantizationSpecAsymPerTensor>(input_spec);
+  auto output_quant_spec = std::static_pointer_cast<ir::linalg::QuantizationSpecAsymPerTensor>(output_spec);
+
+  auto weight_spec_attr = weight->getAttr("quant_recipe");
+  MLLM_RETURN_FALSE_IF_NOT(weight_spec_attr);
+  auto weight_spec_base = weight_spec_attr->cast_<mllm::ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_;
+  MLLM_RETURN_FALSE_IF_NOT(weight_spec_base->type == ir::linalg::QuantizationSpecType::kAsymPerTensor);
+  auto weight_quant_spec = std::static_pointer_cast<ir::linalg::QuantizationSpecAsymPerTensor>(weight_spec_base);
+
+  const bool input_is_u8 = input_quant_spec->quant_to_type == kUInt8;
+  const bool output_is_u8 = output_quant_spec->quant_to_type == kUInt8;
+  const bool gamma_is_u8 = weight_quant_spec->quant_to_type == kUInt8 &&
+                          (weight->tensor_.dtype() == kUInt8 || weight->tensor_.dtype() == kUInt8PerTensorAsy);
+  const bool native_u8 = input_is_u8 && output_is_u8 && gamma_is_u8;
+  const bool needs_a8_bridge = !native_u8 && (input_is_u8 || output_is_u8);
 
   auto make_uint16_bridge = [&](const ir::tensor::TensorValue::ptr_t& source, const std::string& suffix,
                                 const std::shared_ptr<ir::linalg::QuantizationSpecAsymPerTensor>& source_spec) {
@@ -68,10 +82,13 @@ bool QnnAOTRMSNormPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& op)
   auto rms_output = needs_a8_bridge ? make_uint16_bridge(o_0, "_a16_output", output_quant_spec) : o_0;
 
   // Fake bias, nn module seems to be inconsistent with document (AMAZING!).
-  // Keep the parameter-side bias carrier aligned with the preserved UInt16
-  // RMSNorm weight. Activation inputs/outputs may independently be A8.
-  auto bias_tensor = mllm::Tensor::zeros(weight->tensor_.shape(), kUInt16);
-  bias_tensor = bias_tensor.__unsafeSetDType(kUInt16PerTensorAsy);
+  // It is a synthetic all-zero tensor, so the native U8 experiment uses an
+  // asymmetric U8 carrier and preserves exact real zero (zero_point=0).
+  const auto parameter_dtype = gamma_is_u8 ? kUInt8 : kUInt16;
+  const auto parameter_ir_dtype = gamma_is_u8 ? kUInt8PerTensorAsy : kUInt16PerTensorAsy;
+  const int32_t parameter_quant_max = gamma_is_u8 ? 255 : 65535;
+  auto bias_tensor = mllm::Tensor::zeros(weight->tensor_.shape(), parameter_dtype);
+  bias_tensor = bias_tensor.__unsafeSetDType(parameter_ir_dtype);
 
   MLLM_WARN("Making Fake bias for RMSNorm");
   bias_tensor.setName(a->getName() + "_runtime_bias");
@@ -80,18 +97,15 @@ bool QnnAOTRMSNormPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& op)
   // Fake bias quant recipe
   auto bias_scale = Tensor::ones({1}, kFloat32);
   auto bias_zero_point = Tensor::zeros({1}, kInt32);
-  auto weight_quant_spec = std::static_pointer_cast<ir::linalg::QuantizationSpecAsymPerTensor>(
-      weight->getAttr("quant_recipe")->cast_<mllm::ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_);
   bias_scale.at<float>({0}) = weight_quant_spec->scale.item<float>();
   MLLM_RT_ASSERT_EQ(bias_zero_point.item<mllm_int32_t>(), 0);
   auto quant_spec = mllm::ir::linalg::QuantizationSpecAsymPerTensor::create(
-      0, 65535, kUInt16, kFloat32, kInt32, bias_scale, bias_zero_point);
+      0, parameter_quant_max, parameter_dtype, kFloat32, kInt32, bias_scale, bias_zero_point);
   auto quant_attr = mllm::ir::linalg::LinalgIRQuantizatonSpecAttr::build(writer.getContext().get(), quant_spec);
   bias_node->setAttr("quant_recipe", quant_attr);
 
-  // QAIRT requires an UInt16 gamma to run in the INT16 RmsNorm
-  // configuration. Keep target Linear activations A8 by making the boundary
-  // conversions explicit inside the HTP graph.
+  // Use the native HTP U8 configuration only when all RmsNorm data operands
+  // are U8. Legacy U16 gamma remains supported through the explicit bridge.
   if (needs_a8_bridge) {
     auto pre_convert = QnnAOTNodeOperation::create("Convert");
     pre_convert->setPackageName("qti.aisw");

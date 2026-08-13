@@ -481,7 +481,9 @@ bool LLMQuantRecipeRMSNormPattern::rewrite(ir::IRWriter& writer, const ir::op_pt
 
   auto rms_norm_ir = node->cast_<ir::linalg::RMSNormOp>();
 
-  // RMS Norm's weight quantization method same as inputs, but not share, just same type
+  // RMSNorm gamma follows the dtype emitted by the model exporter.  Qwen3's
+  // native-U8 experiment emits UInt8 gamma, while the archived path emits
+  // UInt16 gamma; keep both contracts available for shared users of this pass.
   auto weight_name = rms_norm_ir->getAOp()->getName() + ".weight";
   auto weight_reg_tensor_ir = writer.getContext()->lookupSymbolTable(weight_name);
   MLLM_RETURN_FALSE_IF_NOT(weight_reg_tensor_ir);
@@ -489,13 +491,26 @@ bool LLMQuantRecipeRMSNormPattern::rewrite(ir::IRWriter& writer, const ir::op_pt
   MLLM_RETURN_FALSE_IF_NOT(weight_reg_tensor_ir->outputs().front()->isa_<ir::tensor::TensorValue>());
   auto t = weight_reg_tensor_ir->outputs().front()->cast_<ir::tensor::TensorValue>();
 
-  // RMSNorm weight dtype must be uint16, force set to kUInt16PerTensorAsy
-  MLLM_RETURN_FALSE_IF_NOT(t->tensor_.dtype() == kUInt16 || t->tensor_.dtype() == kUInt16PerTensorAsy);
-  t->tensor_ = t->tensor_.__unsafeSetDType(kUInt16PerTensorAsy);
+  const auto storage_dtype = t->tensor_.dtype();
+  DataTypes quant_dtype = kUInt16;
+  DataTypes quant_ir_dtype = kUInt16PerTensorAsy;
+  int32_t quant_max = 65535;
+  if (storage_dtype == kUInt8 || storage_dtype == kUInt8PerTensorAsy) {
+    quant_dtype = kUInt8;
+    quant_ir_dtype = kUInt8PerTensorAsy;
+    quant_max = 255;
+  } else if (storage_dtype == kUInt16 || storage_dtype == kUInt16PerTensorAsy) {
+    quant_dtype = kUInt16;
+    quant_ir_dtype = kUInt16PerTensorAsy;
+    quant_max = 65535;
+  } else {
+    MLLM_ERROR("RMSNorm gamma '{}' must be UInt8 or UInt16, got {}", weight_name, nameOfType(storage_dtype));
+    return false;
+  }
+  t->tensor_ = t->tensor_.__unsafeSetDType(quant_ir_dtype);
 
-  // FIXME: This dtype is hardcoded. We should make it right.
   auto weight_spec_attr = writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(
-      ir::linalg::QuantizationSpecAsymPerTensor::create(0, 65536 - 1, kUInt16, kFloat32, kInt32, Tensor::nil(), Tensor::nil()));
+      ir::linalg::QuantizationSpecAsymPerTensor::create(0, quant_max, quant_dtype, kFloat32, kInt32, Tensor::nil(), Tensor::nil()));
   weight_reg_tensor_ir->outputs().front()->setAttr("quant_recipe", weight_spec_attr);
 
   // Get self anno

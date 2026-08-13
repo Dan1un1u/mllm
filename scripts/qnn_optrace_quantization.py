@@ -34,6 +34,7 @@ CATEGORY_INFO = {
     "lpbq_sync_checkpoint": (50, "LPBQ synchronization", "DMA sets, checkpoints, waits and scheduling glue"),
     "lpbq_other_fused": (60, "LPBQ other fused work", "Other lowered work owned by Conv2d_w_blk_exp_scale"),
     "explicit_convert_requant": (70, "Explicit Convert/CastType", "Graph-visible type conversion, quantize/dequantize or requantize"),
+    "rmsnorm": (75, "RMSNorm", "Native qti.aisw RMSNorm execution; included for full graph contract auditing"),
     "fused_linearclip_requant": (80, "Fused linear clip/requant", "Consumer-fused clamp and output requantization"),
     "matmul_signed_conversion": (90, "MatMul signed conversion", "HTP-internal conversion/shuffle into signed operands"),
     "other_quant_kernel": (100, "Other quantization-related kernel", "Quantization-related HTP name not covered above"),
@@ -71,6 +72,8 @@ def classify_quant_kernel(htp_type, qnn_type, flags):
         return "matmul_signed_conversion"
     if qnn_type in {"Convert", "CastType"}:
         return "explicit_convert_requant"
+    if qnn_type == "RmsNorm":
+        return "rmsnorm"
     if "linearclip" in low:
         return "fused_linearclip_requant"
     if any(token in low or token in qnn_low for token in ("quant", "dequant", "requant")):

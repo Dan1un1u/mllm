@@ -2,15 +2,20 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-models_root=/mnt/d/llm_exp/models
-results_root=/mnt/d/llm_exp/results
+models_root="${MODELS_ROOT:-/mnt/d/llm_exp/models}"
+results_root="${RESULTS_ROOT:-/mnt/d/llm_exp/results}"
+work_root="${W4A8_WORK_ROOT:-${models_root}/w4a8g32}"
 source_model="${SOURCE_MODEL:-${models_root}/Qwen3-origin}"
 venv="${W4A8_VENV:-${models_root}/w4a8g32/intermediate/python/venv}"
 run_id="${1:-$(date +%Y%m%d_%H%M%S)}"
-stage_dir="${models_root}/w4a8g32/staging/${run_id}"
+[[ "${run_id}" != "-h" && "${run_id}" != "--help" ]] || {
+  echo "usage: $0 [RUN_ID]"
+  exit 0
+}
+stage_dir="${W4A8_STAGE_DIR:-${work_root}/staging/${run_id}}"
 calibration_dir="${models_root}/w4a8g32/calibration"
 corpus="${calibration_dir}/qwen3_wikitext_103_v1_train_128x512.jsonl"
-log_dir="${results_root}/w4a8g32_build_logs/${run_id}"
+log_dir="${W4A8_LOG_ROOT:-${results_root}/w4a8g32_build_logs}/${run_id}"
 output_model="${stage_dir}/qwen3_1.7b_w4a8g32.mllm"
 
 [[ -d "${repo_root}/.git" ]] || { echo "not an mllm source checkout: ${repo_root}" >&2; exit 2; }
@@ -50,7 +55,9 @@ export PYTHONPATH="${repo_root}${PYTHONPATH:+:${PYTHONPATH}}"
   sha256sum "${output_model}" > "${log_dir}/model.sha256"
   sha256sum "${corpus}" > "${log_dir}/calibration-corpus.sha256"
   git -C "${repo_root}" rev-parse HEAD > "${log_dir}/source-head.txt"
-  git -C "${repo_root}" diff --binary -- . ':!third_party/half/include/half/half.hpp' \
+  git -C "${repo_root}" diff --binary -- \
+    CONTEXT.md \
+    mllm pymllm scripts run_qwen3_sm8750_v79_g32_profile.sh \
     > "${log_dir}/source-working-tree.patch"
   "${venv}/bin/python" -m pip freeze > "${log_dir}/python-freeze.txt"
   printf '%s\n' "${output_model}" > "${log_dir}/output-model.txt"

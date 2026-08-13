@@ -2,18 +2,23 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-models_root=/mnt/d/llm_exp/models
-results_root=/mnt/d/llm_exp/results
+models_root="${MODELS_ROOT:-/mnt/d/llm_exp/models}"
+results_root="${RESULTS_ROOT:-/mnt/d/llm_exp/results}"
+work_root="${W4A8_WORK_ROOT:-${models_root}/w4a8g32}"
 qairt_root="${QAIRT_SDK_ROOT:-${models_root}/qualcomm-sdk/qairt/2.47.0.260601}"
 compiler="${W4A8_AOT_COMPILER:-${repo_root}/build-qnn-aot/bin/mllm-qwen3-aot-sha-g32-c}"
 run_id="${1:?usage: build_qwen3_w4a8g32_context.sh RUN_ID [MODEL.mllm]}"
-stage_dir="${models_root}/w4a8g32/staging/${run_id}"
+[[ "${run_id}" != "-h" && "${run_id}" != "--help" ]] || {
+  echo "usage: $0 RUN_ID [MODEL.mllm]"
+  exit 0
+}
+stage_dir="${W4A8_STAGE_DIR:-${work_root}/staging/${run_id}}"
 model="${2:-${stage_dir}/qwen3_1.7b_w4a8g32.mllm}"
 artifact_dir="${stage_dir}/qnn"
 manifest_dir="${artifact_dir}/manifests"
 optrace_dir="${artifact_dir}/schematics"
 context="${artifact_dir}/qwen3-1.7B-w4a8g32-sha.bin"
-log_dir="${results_root}/w4a8g32_build_logs/${run_id}"
+log_dir="${W4A8_LOG_ROOT:-${results_root}/w4a8g32_build_logs}/${run_id}"
 qnn_lib="${qairt_root}/lib/x86_64-linux-clang"
 
 [[ -f "${model}" ]] || { echo "model missing: ${model}" >&2; exit 2; }

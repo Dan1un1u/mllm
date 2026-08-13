@@ -68,9 +68,33 @@ _Avoid_: Shared candidate directory, device-restored artifact
 Any fallback introduced by the W4A8 change that moves a target operation to UInt16, floating point, CPU, or another non-target execution path. Pre-existing boundaries inherited unchanged from the archived W4A16 baseline are not added fallbacks.
 _Avoid_: Compatibility path
 
-**Documented SDK boundary conversion**:
-An explicit HTP Convert required by a pinned QAIRT operator contract while preserving a non-target archived-baseline precision. For QAIRT 2.47 RmsNorm, this is the A8-to-A16 input and A16-to-A8 output bridge around retained UInt16 gamma/bias. It is measured and traced, and it must not conceal a target Linear/Conv2D fallback.
-_Avoid_: Free conversion, implicit fallback
+**Recipe-induced RMSNorm bridge**:
+The explicit HTP A8-to-A16 input and A16-to-A8 output conversion around RmsNorm that preserves the baseline's UInt16 gamma and bias recipe. QAIRT 2.47 also exposes a native UInt8 RmsNorm configuration, so this bridge is a property of the baseline recipe rather than an SDK requirement.
+_Avoid_: Required SDK conversion, free conversion, implicit fallback
+
+**Native U8 RMSNorm experiment**:
+An isolated derivative of the experimental W4A8 baseline that changes only RmsNorm parameter precision as required to use the hardware backend's native UInt8 input/output configuration and remove the recipe-induced RMSNorm bridges. All non-RmsNorm recipes, graph behavior, workloads, and profiling conditions remain fixed.
+_Avoid_: W4A8 redesign, general mixed-precision optimization
+
+**Zero-bias RMSNorm variant**:
+One native U8 RMSNorm experiment variant distinguished only by the storage and quantization contract of the synthetic all-zero bias. Its bias has no learned information, so UInt8 and symmetric Int32 variants differ as backend configurations rather than as model-precision alternatives.
+_Avoid_: Learned bias variant, higher-precision model bias
+
+**Native U8 RMSNorm zero bias**:
+The synthetic all-zero RmsNorm bias represented as asymmetric UInt8 with an encoding that preserves exact real zero. It is the sole bias configuration in the native U8 RMSNorm experiment; a wider bias is excluded because this model has no learned RmsNorm bias to preserve.
+_Avoid_: Int32 precision variant, learned RMSNorm bias
+
+**U8 Q/K normalization-to-RoPE path**:
+The Qwen3 attention path in which each Q/K head RmsNorm consumes and produces asymmetric UInt8 and feeds the existing UInt8 RoPE decomposition directly. RoPE remains unchanged; eliminating the RmsNorm UInt16 island removes rather than relocates the precision conversion.
+_Avoid_: UInt16 RoPE path, RmsNorm-only U8 island
+
+**Native WSL build workspace**:
+The Linux-filesystem workspace used for compilation, model transformation, context generation, temporary logs, and other small-file-intensive processing. It is disposable working state, not the artifact archive.
+_Avoid_: D-drive build tree, archived runtime build
+
+**Published experiment artifact**:
+A completed model, context binary, or compact evidence bundle copied from the native WSL build workspace into its immutable experiment namespace under `D:\llm_exp`, with source and destination digests verified. Partial or failed working state is not a published artifact.
+_Avoid_: Build cache, staging directory, unverified copy
 
 ## Settled baseline outcome
 

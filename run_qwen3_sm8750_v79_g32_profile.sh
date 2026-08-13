@@ -30,11 +30,12 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 
 RESULTS_BASE="${RESULTS_BASE:-${ARTIFACT_ROOT}/results}"
 RESUME_RESULT_ROOT="${RESUME_RESULT_ROOT:-}"
+RESULT_PREFIX="${RESULT_PREFIX:-qwen3_sm8750_v79_w4a8g32}"
 if [[ -n "${RESUME_RESULT_ROOT}" ]]; then
     RESULT_ROOT="${RESUME_RESULT_ROOT}"
-    TIMESTAMP="${RESULT_ROOT##*w4a8g32_}"
+    TIMESTAMP="${RESULT_ROOT##*_}"
 else
-    RESULT_ROOT="${RESULTS_BASE}/qwen3_sm8750_v79_w4a8g32_${TIMESTAMP}"
+    RESULT_ROOT="${RESULTS_BASE}/${RESULT_PREFIX}_${TIMESTAMP}"
 fi
 REMOTE_DIR="${REMOTE_DIR:-/data/local/tmp/mllm_w4a8g32}"
 REMOTE_ROOT="${REMOTE_ROOT:-${REMOTE_DIR}/qwen3_sm8750_v79_g32_profile_${TIMESTAMP}}"
@@ -55,6 +56,7 @@ MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-64}"
 ACCURACY_MAX_NEW_TOKENS="${ACCURACY_MAX_NEW_TOKENS:-64}"
 AR_LEN="${AR_LEN:-32}"
 CLEAN_REMOTE="${CLEAN_REMOTE:-1}"
+RMSNORM_U8_CONTRACT="${RMSNORM_U8_CONTRACT:-0}"
 PROMPT="${PROMPT:-Explain how quantized Transformer inference maps matrix, vector, and data movement work onto a mobile NPU. Discuss attention, KV cache, MLP, and the cost of quantization conversions in enough detail to continue for at least sixty-four generated tokens.}"
 
 REMOTE_RUNNER="${BASELINE_REMOTE_RUNNER}"
@@ -447,6 +449,10 @@ for graph in s32 s1; do
         >"${host_prefix}-quantization-generation.log"
 done
 
+acceptance_args=()
+if [[ "${RMSNORM_U8_CONTRACT}" == "1" ]]; then
+    acceptance_args+=(--rmsnorm-u8)
+fi
 python3 "${REPO_ROOT}/scripts/qnn_w4a8_acceptance.py" \
     --s1-manifest "${MANIFEST_DIR}/model.0.s1_quant_manifest.json" \
     --s1-trace "${RESULT_ROOT}/qwen3-sm8750-v79-g32-s1-chrometrace.json" \
@@ -455,6 +461,7 @@ python3 "${REPO_ROOT}/scripts/qnn_w4a8_acceptance.py" \
     --s32-trace "${RESULT_ROOT}/qwen3-sm8750-v79-g32-s32-chrometrace.json" \
     --s32-qhas "${RESULT_ROOT}/qwen3-sm8750-v79-g32-s32-chrometrace_qnn_htp_analysis_summary.json" \
     --output "${RESULT_ROOT}/qwen3-sm8750-v79-g32-w4a8-acceptance.json" \
+    "${acceptance_args[@]}" \
     | tee "${RESULT_ROOT}/w4a8-acceptance.log"
 
 echo "===== Throughput summary and canonical report ====="

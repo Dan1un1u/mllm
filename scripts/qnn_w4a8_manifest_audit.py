@@ -6,7 +6,17 @@ import json
 from pathlib import Path
 
 
-def audit(path: Path) -> dict:
+def _check_u8_tensor(tensor: dict, label: str, failures: list[str]) -> None:
+    if tensor.get("logical_quant_dtype") != "UInt8":
+        failures.append(f"{label}: logical dtype is not UInt8")
+    if tensor.get("qnn_dtype") != "UFIXED_POINT_8":
+        failures.append(f"{label}: QNN dtype is not UFIXED_POINT_8")
+    quant = tensor.get("quant_recipe", {})
+    if quant.get("type") != "asymmetric_per_tensor" or quant.get("quant_min") != 0 or quant.get("quant_max") != 255:
+        failures.append(f"{label}: is not asymmetric 0..255")
+
+
+def audit(path: Path, rmsnorm_u8: bool = False) -> dict:
     document = json.loads(path.read_text(encoding="utf-8"))
     tensors = {tensor["name"]: tensor for tensor in document["tensors"]}
     targets = []
@@ -50,12 +60,32 @@ def audit(path: Path) -> dict:
         if op.get("qnn_op_type") == "Convert"
         and (op["name"].endswith(".a8_to_a16") or op["name"].endswith(".a16_to_a8"))
     ]
-    if len(bridges) != 1458:
+    rmsnorms = [op for op in document["operations"] if op.get("qnn_op_type") == "RmsNorm"]
+    if len(rmsnorms) != 729:
+        failures.append(f"expected 729 qti.aisw RmsNorm operations, found {len(rmsnorms)}")
+    if rmsnorm_u8:
+        if bridges:
+            failures.append(f"expected 0 explicit RMSNorm bridge conversions, found {len(bridges)}")
+        for operation in rmsnorms:
+            inputs = operation.get("inputs", [])
+            outputs = operation.get("outputs", [])
+            if len(inputs) != 3 or len(outputs) != 1:
+                failures.append(f"{operation['name']}: unexpected RmsNorm arity")
+                continue
+            for role, tensor_id in (("input", inputs[0]), ("gamma", inputs[1]), ("bias", inputs[2]), ("output", outputs[0])):
+                tensor = tensors.get(tensor_id)
+                if tensor is None:
+                    failures.append(f"{operation['name']}: missing {role} tensor {tensor_id}")
+                else:
+                    _check_u8_tensor(tensor, f"{operation['name']}: {role}", failures)
+    elif len(bridges) != 1458:
         failures.append(f"expected 1458 explicit RMSNorm bridge conversions, found {len(bridges)}")
     return {
         "graph": document["graph"],
         "target_operation_count": len(targets),
+        "rmsnorm_operation_count": len(rmsnorms),
         "explicit_rmsnorm_bridge_count": len(bridges),
+        "rmsnorm_u8_contract": rmsnorm_u8,
         "failures": failures,
     }
 
@@ -64,8 +94,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("manifest", nargs="+", type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--rmsnorm-u8",
+        action="store_true",
+        help="Require all qti.aisw RmsNorm operands to be asymmetric UInt8 with zero explicit bridges.",
+    )
     args = parser.parse_args()
-    reports = [audit(path) for path in args.manifest]
+    reports = [audit(path, rmsnorm_u8=args.rmsnorm_u8) for path in args.manifest]
     failures = [failure for report in reports for failure in report["failures"]]
     result = {"status": "pass" if not failures else "fail", "graphs": reports}
     args.output.parent.mkdir(parents=True, exist_ok=True)

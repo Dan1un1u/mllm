@@ -82,7 +82,15 @@ void solveRMSNormWeight(const ir::IRContext::ptr_t& ctx, const ParameterFile::pt
       auto zero_point = pf->pull(mllm_op->getName() + ".zero_point");
       this_spec->scale = scale;
       this_spec->zero_point = zero_point;
-      checkTypeLimits<uint16_t>(pf->pull(mllm_op->getName() + ".weight"), this_spec->quant_min, this_spec->quant_max);
+      auto weight = pf->pull(mllm_op->getName() + ".weight");
+      if (this_spec->quant_to_type == kUInt8) {
+        checkTypeLimits<uint8_t>(weight, this_spec->quant_min, this_spec->quant_max);
+      } else if (this_spec->quant_to_type == kUInt16) {
+        checkTypeLimits<uint16_t>(weight, this_spec->quant_min, this_spec->quant_max);
+      } else {
+        MLLM_ERROR_EXIT(ExitCode::kCoreError, "Unsupported RMSNorm gamma storage type: {}",
+                        nameOfType(this_spec->quant_to_type));
+      }
       MLLM_RT_ASSERT(scale.dtype() == kFloat32);
       MLLM_RT_ASSERT(scale.rank() == 1);
       MLLM_RT_ASSERT(scale.item<float>() > 0);

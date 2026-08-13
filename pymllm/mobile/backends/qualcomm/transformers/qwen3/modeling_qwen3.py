@@ -190,6 +190,11 @@ class Qwen3Attention(nn.Module):
         self.layer_idx = layer_idx
         self.block_size = config.linear_block_size
         self.activation_bits = activation_bits(config)
+        # RMSNorm gamma follows the selected activation precision so the AOT
+        # backend can use its matching native quantized RMSNorm configuration.
+        # This is deliberately scoped to RMSNorm parameters; the surrounding
+        # QDQ/Linear/KV recipes remain controlled by their existing bits.
+        self.rms_norm_bits = self.activation_bits
         self.head_dim = getattr(
             config, "head_dim", config.hidden_size // config.num_attention_heads
         )
@@ -225,10 +230,10 @@ class Qwen3Attention(nn.Module):
             block_size=self.block_size,
         )
         self.q_norm = QRMSNorm(
-            self.head_dim, eps=config.rms_norm_eps, quant_bits=16
+            self.head_dim, eps=config.rms_norm_eps, quant_bits=self.rms_norm_bits
         )  # unlike olmo, only on the head dim!
         self.k_norm = QRMSNorm(
-            self.head_dim, eps=config.rms_norm_eps, quant_bits=16
+            self.head_dim, eps=config.rms_norm_eps, quant_bits=self.rms_norm_bits
         )  # thus post q_norm does not need reshape
         self.sliding_window = (
             config.sliding_window
@@ -413,15 +418,16 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
         self.layer_dix = layer_idx
         self.hidden_size = config.hidden_size
         self.activation_bits = activation_bits(config)
+        self.rms_norm_bits = self.activation_bits
 
         self.self_attn = Qwen3Attention(config=config, layer_idx=layer_idx)
 
         self.mlp = Qwen3MLP(config)
         self.input_layernorm = QRMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps, quant_bits=16
+            config.hidden_size, eps=config.rms_norm_eps, quant_bits=self.rms_norm_bits
         )
         self.post_attention_layernorm = QRMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps, quant_bits=16
+            config.hidden_size, eps=config.rms_norm_eps, quant_bits=self.rms_norm_bits
         )
         self.attention_type = config.layer_types[layer_idx]
 
@@ -548,6 +554,7 @@ class Qwen3Model(Qwen3PreTrainedModel):
         super().__init__(config)
         normalize_qwen3_lpbq_block_size(config)
         self.activation_bits = activation_bits(config)
+        self.rms_norm_bits = self.activation_bits
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
         self.embed_tokens = QEmbedding(
@@ -562,7 +569,7 @@ class Qwen3Model(Qwen3PreTrainedModel):
                 for layer_idx in range(config.num_hidden_layers)
             ]
         )
-        self.norm = QRMSNorm(config.hidden_size, eps=config.rms_norm_eps, quant_bits=16)
+        self.norm = QRMSNorm(config.hidden_size, eps=config.rms_norm_eps, quant_bits=self.rms_norm_bits)
         self.rotary_emb = Qwen3RotaryEmbedding(config=config)
         self.gradient_checkpointing = False
         self.has_sliding_layers = "sliding_attention" in self.config.layer_types
