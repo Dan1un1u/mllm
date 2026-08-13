@@ -149,6 +149,33 @@ ADB_STATE="$("${ADB[@]}" get-state 2>/dev/null | tr -d '\r' || true)"
 [[ "${ADB_STATE}" == "device" ]] \
     || die "no online Android device is available (adb state: ${ADB_STATE:-none})"
 
+# Windows adb.exe runs outside WSL and cannot reliably resolve Linux mount
+# paths such as /mnt/d/... on its host-side push/pull arguments. Keep paths in
+# native WSL form for validation, hashing, and the profile viewer, translating
+# only at the adb.exe boundary.
+ADB_IS_WINDOWS=0
+case "$(basename "${ADB_BIN}")" in
+    *.exe|*.EXE) ADB_IS_WINDOWS=1 ;;
+esac
+adb_host_path() {
+    local path="$1"
+    if (( ADB_IS_WINDOWS )); then
+        wslpath -w -- "${path}"
+    else
+        printf '%s\n' "${path}"
+    fi
+}
+adb_push() {
+    local source="$1"
+    local destination="$2"
+    "${ADB[@]}" push "$(adb_host_path "${source}")" "${destination}"
+}
+adb_pull() {
+    local source="$1"
+    local destination="$2"
+    "${ADB[@]}" pull "${source}" "$(adb_host_path "${destination}")"
+}
+
 if [[ "${BUILD_ANDROID}" == "1" ]]; then
     echo "===== Build Android QNN runner ====="
     (cd "${REPO_ROOT}" && python3 task.py tasks/build_android_qnn.yaml)
@@ -244,35 +271,34 @@ fi
 if [[ "${PREPARE_DEVICE}" == "1" ]]; then
     echo "===== Prepare device ====="
     "${ADB[@]}" shell "mkdir -p '${REMOTE_DIR}'"
-    "${ADB[@]}" push "${LOCAL_BUILD_BIN}"/*.so "${REMOTE_DIR}/" >/dev/null
-    "${ADB[@]}" push "${LOCAL_LIBOMP}" "${REMOTE_DIR}/libomp.so" >/dev/null
-    "${ADB[@]}" push \
-        "${QAIRT_ANDROID_LIB}/libQnnHtp.so" \
-        "${QAIRT_ANDROID_LIB}/libQnnSystem.so" \
-        "${QAIRT_ANDROID_LIB}/libQnnHtpV79Stub.so" \
-        "${QAIRT_ANDROID_LIB}/libQnnHtpProfilingReader.so" \
-        "${QAIRT_ANDROID_LIB}/libQnnHtpOptraceProfilingReader.so" \
-        "${QAIRT_ANDROID_LIB}/libQnnHtpPrepare.so" \
-        "${REMOTE_DIR}/" >/dev/null
-    "${ADB[@]}" push "${QAIRT_V79_LIB}/libQnnHtpV79Skel.so" \
+    for local_so in "${LOCAL_BUILD_BIN}"/*.so; do
+        [[ -f "${local_so}" ]] || continue
+        adb_push "${local_so}" "${REMOTE_DIR}/" >/dev/null
+    done
+    adb_push "${LOCAL_LIBOMP}" "${REMOTE_DIR}/libomp.so" >/dev/null
+    for qnn_lib in libQnnHtp.so libQnnSystem.so libQnnHtpV79Stub.so \
+        libQnnHtpProfilingReader.so libQnnHtpOptraceProfilingReader.so libQnnHtpPrepare.so; do
+        adb_push "${QAIRT_ANDROID_LIB}/${qnn_lib}" "${REMOTE_DIR}/${qnn_lib}" >/dev/null
+    done
+    adb_push "${QAIRT_V79_LIB}/libQnnHtpV79Skel.so" \
         "${REMOTE_DIR}/libQnnHtpV79Skel.so" >/dev/null
-    "${ADB[@]}" push "${LLAMA_PACKAGE_BUILD}/aarch64-android/libQnnLLaMAPackage.so" \
+    adb_push "${LLAMA_PACKAGE_BUILD}/aarch64-android/libQnnLLaMAPackage.so" \
         "${REMOTE_DIR}/libQnnLLaMAPackage_CPU.so" >/dev/null
-    "${ADB[@]}" push "${LLAMA_PACKAGE_BUILD}/hexagon-v79/libQnnLLaMAPackage.so" \
+    adb_push "${LLAMA_PACKAGE_BUILD}/hexagon-v79/libQnnLLaMAPackage.so" \
         "${REMOTE_DIR}/libQnnLLaMAPackage_HTP.so" >/dev/null
-    "${ADB[@]}" push "${LOCAL_RUNNER}" "${REMOTE_DIR}/${REMOTE_RUNNER}" >/dev/null
+    adb_push "${LOCAL_RUNNER}" "${REMOTE_DIR}/${REMOTE_RUNNER}" >/dev/null
     # Windows ADB may not preserve the executable bit when pushing from a
     # mounted WSL path.  The runner is the only pushed artifact that must be
     # executable; shared libraries are loaded by the runner and need no mode
     # change.
     "${ADB[@]}" shell "chmod 755 '${REMOTE_DIR}/${REMOTE_RUNNER}'"
-    "${ADB[@]}" push "${LOCAL_TOKENIZER}" "${REMOTE_DIR}/${REMOTE_TOKENIZER}" >/dev/null
-    "${ADB[@]}" push "${LOCAL_CONFIG}" "${REMOTE_DIR}/${REMOTE_CONFIG}" >/dev/null
+    adb_push "${LOCAL_TOKENIZER}" "${REMOTE_DIR}/${REMOTE_TOKENIZER}" >/dev/null
+    adb_push "${LOCAL_CONFIG}" "${REMOTE_DIR}/${REMOTE_CONFIG}" >/dev/null
     REMOTE_CONTEXT_SHA="$("${ADB[@]}" shell "sha256sum '${REMOTE_DIR}/${REMOTE_MODEL}' 2>/dev/null" \
         | awk '{print $1}' | tr -d '\r' || true)"
     if [[ "${REMOTE_CONTEXT_SHA}" != "${EXPECTED_CONTEXT_SHA}" ]]; then
         echo "Pushing 1.6 GiB G32 V79 context ..."
-        "${ADB[@]}" push "${LOCAL_MODEL}" "${REMOTE_DIR}/${REMOTE_MODEL}" >/dev/null
+        adb_push "${LOCAL_MODEL}" "${REMOTE_DIR}/${REMOTE_MODEL}" >/dev/null
     fi
 fi
 
@@ -299,7 +325,7 @@ check_remote_sha() {
 check_remote_sha "tokenizer" "${REMOTE_DIR}/${REMOTE_TOKENIZER}" "${EXPECTED_TOKENIZER_SHA}"
 check_remote_sha "config" "${REMOTE_DIR}/${REMOTE_CONFIG}" "${EXPECTED_CONFIG_SHA}"
 "${ADB[@]}" shell "mkdir -p '${REMOTE_ROOT}'"
-"${ADB[@]}" push "${ACCURACY_SUITE}" "${REMOTE_ROOT}/accuracy_suite.tsv" >/dev/null
+adb_push "${ACCURACY_SUITE}" "${REMOTE_ROOT}/accuracy_suite.tsv" >/dev/null
 
 echo "===== Profiling-off E2E throughput (${BENCHMARK_RUNS} rounds) ====="
 for ((round = 1; round <= BENCHMARK_RUNS; ++round)); do
@@ -331,9 +357,9 @@ for ((round = 1; round <= BENCHMARK_RUNS; ++round)); do
     run_status="${PIPESTATUS[1]}"
     set -e
     [[ "${run_status}" == "0" ]] || die "benchmark ${run_name} failed with status ${run_status}"
-    "${ADB[@]}" pull "${remote_run}/qnn_runner_e2e.csv" "${host_dir}/qnn_runner_e2e.csv" >/dev/null
+    adb_pull "${remote_run}/qnn_runner_e2e.csv" "${host_dir}/qnn_runner_e2e.csv" >/dev/null
     if "${ADB[@]}" shell "test -f '${remote_run}/qnn_e2e_profile.csv'"; then
-        "${ADB[@]}" pull "${remote_run}/qnn_e2e_profile.csv" "${host_dir}/qnn_graph_module_e2e.csv" >/dev/null
+        adb_pull "${remote_run}/qnn_e2e_profile.csv" "${host_dir}/qnn_graph_module_e2e.csv" >/dev/null
     fi
     "${ADB[@]}" shell dumpsys thermalservice >"${host_dir}/thermal_after.txt" || true
     if ((round < BENCHMARK_RUNS && BENCHMARK_COOLDOWN_SEC > 0)); then
@@ -365,7 +391,7 @@ set +e
 accuracy_status="${PIPESTATUS[0]}"
 set -e
 [[ "${accuracy_status}" == "0" ]] || die "accuracy sanity runner failed with status ${accuracy_status}"
-"${ADB[@]}" pull "${remote_accuracy}/qnn_accuracy_eval.csv" \
+adb_pull "${remote_accuracy}/qnn_accuracy_eval.csv" \
     "${RESULT_ROOT}/accuracy/qnn_accuracy_eval.csv" >/dev/null
 python3 "${REPO_ROOT}/scripts/qnn_accuracy_summary.py" \
     "${RESULT_ROOT}/accuracy/qnn_accuracy_eval.csv" \
@@ -412,11 +438,11 @@ for graph in s32 s1; do
     set -e
     [[ "${run_status}" == "0" ]] || die "${graph} Optrace runner failed with status ${run_status}"
 
-    "${ADB[@]}" pull "${remote_capture}/qnn-profiling-data.log" "${host_prefix}-optrace.log" >/dev/null
+    adb_pull "${remote_capture}/qnn-profiling-data.log" "${host_prefix}-optrace.log" >/dev/null
     for profile_file in qnn_detail_profile.txt qnn_macro_profile.csv qnn_e2e_profile.csv; do
         if "${ADB[@]}" shell "test -f '${remote_capture}/${profile_file}'"; then
             suffix="${profile_file#qnn_}"
-            "${ADB[@]}" pull "${remote_capture}/${profile_file}" "${host_prefix}-${suffix}" >/dev/null
+            adb_pull "${remote_capture}/${profile_file}" "${host_prefix}-${suffix}" >/dev/null
         fi
     done
     "${ADB[@]}" shell dumpsys thermalservice >"${host_prefix}-thermal-after.txt" || true
