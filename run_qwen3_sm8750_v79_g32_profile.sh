@@ -126,6 +126,7 @@ fi
 
 PROFILE_VIEWER="${QAIRT_SDK_ROOT}/bin/x86_64-linux-clang/qnn-profile-viewer"
 OPTRACE_READER="${QAIRT_SDK_ROOT}/lib/x86_64-linux-clang/libQnnHtpOptraceProfilingReader.so"
+PROFILE_WORK_ROOT="${PROFILE_WORK_ROOT:-}"
 [[ -x "${PROFILE_VIEWER}" ]] || die "qnn-profile-viewer not found: ${PROFILE_VIEWER}"
 [[ -f "${OPTRACE_READER}" ]] || die "Optrace reader not found: ${OPTRACE_READER}"
 for graph in s1 s32; do
@@ -447,12 +448,30 @@ for graph in s32 s1; do
     done
     "${ADB[@]}" shell dumpsys thermalservice >"${host_prefix}-thermal-after.txt" || true
 
-    "${PROFILE_VIEWER}" \
-        --reader "${OPTRACE_READER}" \
-        --input_log "${host_prefix}-optrace.log" \
-        --schematic "${schematic}" \
-        --output "${chrome_trace}" \
-        2>&1 | tee "${host_prefix}-profile-viewer.log"
+    if [[ -n "${PROFILE_WORK_ROOT}" ]]; then
+        viewer_work="${PROFILE_WORK_ROOT}/${graph}"
+        mkdir -p "${viewer_work}"
+        viewer_prefix="${viewer_work}/$(basename "${host_prefix}")"
+        cp "${host_prefix}-optrace.log" "${viewer_prefix}-optrace.log"
+        cp "${schematic}" "${viewer_work}/$(basename "${schematic}")"
+        "${PROFILE_VIEWER}" \
+            --reader "${OPTRACE_READER}" \
+            --input_log "${viewer_prefix}-optrace.log" \
+            --schematic "${viewer_work}/$(basename "${schematic}")" \
+            --output "${viewer_prefix}-chrometrace.json" \
+            2>&1 | tee "${host_prefix}-profile-viewer.log"
+        for viewer_artifact in "${viewer_prefix}"*; do
+            [[ -f "${viewer_artifact}" ]] || continue
+            cp "${viewer_artifact}" "${RESULT_ROOT}/$(basename "${viewer_artifact}")"
+        done
+    else
+        "${PROFILE_VIEWER}" \
+            --reader "${OPTRACE_READER}" \
+            --input_log "${host_prefix}-optrace.log" \
+            --schematic "${schematic}" \
+            --output "${chrome_trace}" \
+            2>&1 | tee "${host_prefix}-profile-viewer.log"
+    fi
     [[ -s "${chrome_trace}" && -s "${htp_json}" && -s "${qhas_json}" ]] \
         || die "${graph}: viewer did not generate all required artifacts"
     fi
