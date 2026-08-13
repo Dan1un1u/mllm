@@ -145,7 +145,9 @@ ADB=("${ADB_BIN}")
 if [[ -n "${ADB_SERIAL}" ]]; then
     ADB+=(-s "${ADB_SERIAL}")
 fi
-"${ADB[@]}" get-state >/dev/null
+ADB_STATE="$("${ADB[@]}" get-state 2>/dev/null || true)"
+[[ "${ADB_STATE}" == "device" ]] \
+    || die "no online Android device is available (adb state: ${ADB_STATE:-none})"
 
 if [[ "${BUILD_ANDROID}" == "1" ]]; then
     echo "===== Build Android QNN runner ====="
