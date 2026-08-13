@@ -96,23 +96,16 @@ _Avoid_: D-drive build tree, archived runtime build
 A completed model, context binary, or compact evidence bundle copied from the native WSL build workspace into its immutable experiment namespace under `D:\llm_exp`, with source and destination digests verified. Partial or failed working state is not a published artifact.
 _Avoid_: Build cache, staging directory, unverified copy
 
-## Settled baseline outcome
+## Clean-room implementation status
 
-The first formal experimental W4A8 baseline result is
-`qwen3_sm8750_v79_w4a8g32_20260813_135938`. Its joint execution evidence passes
-for both whole graphs: s1 and s32 each contain 1009 manifest target operations,
-all 1009 are observed in runtime Optrace, and none has a physical UInt16 target
-input or output.
+The native-U8 RMSNorm experiment is implemented as a clean-room derivative of
+the archived W4A16 path. No historical W4A8 code, artifact, log, or performance
+result is an input to this implementation. The source-to-context build from
+`Qwen3-origin` completes for both split-head graphs; the published manifests
+contain 1009 W4G32 LPBQ targets and 729 native-U8 RmsNorm operations per graph,
+with zero recipe-induced RMSNorm bridges.
 
-Performance is informational. Against archived W4A16 result
-`qwen3_sm8750_v79_g32_20260807_230410`, measured runner medians are 738.693
-token/s prefill (-14.10%) and 37.632 token/s decode-after-first (-17.27%). The
-dominant critical-path classes remain LPBQ weight streaming plus HMX compute in
-the MLP, lm_head, and projection stages. Explicit SDK boundary conversions and
-other HVX conversions add work, so activation-width reduction alone does not
-produce a first-version speedup.
-
-The 100-case sanity run is deliberately not an acceptance gate, but its outcome
-is a material quality warning: 0/100 answers passed and 11 NUL bytes were
-observed. The run completed and the result schema was parseable; this establishes
-the requested experimental hardware baseline, not usable model quality.
+The compiled manifest/schematic evidence is not a substitute for runtime
+evidence. A target Android device must still run the existing profiling wrapper
+to produce comparable E2E data, sanity output, and s1/s32 Optrace; until then
+the experiment is build-valid but not yet a completed True W4A8 execution.
