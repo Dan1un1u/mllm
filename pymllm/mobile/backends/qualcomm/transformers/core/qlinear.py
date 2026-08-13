@@ -5,10 +5,6 @@ from torch.ao.quantization import FakeQuantize, PerChannelMinMaxObserver
 from pymllm.mobile.backends.qualcomm.transformers.core.observer import (
     PerBlockParamFakeQuantize,
 )
-from torchao.quantization.quant_primitives import (
-    _quantize_affine,
-    _get_reduction_params,
-)
 
 
 class QLinear(nn.Module):
@@ -204,15 +200,20 @@ class QLinearLPBQ(QLinear):
         # Convert weight to int4 (represent as int8)
         assert self.weight.shape[-1] % self.block_size[1] == 0
         assert linear_zero_point.sum() == 0
-        weight_int4 = _quantize_affine(
-            self.weight,
-            self.block_size,
-            linear_scale,
-            linear_zero_point,
-            torch.int32,
-            quant_min=-7,
-            quant_max=7,
-        ).to(torch.int8)
+        # Keep this conversion self-contained.  torchao's underscored affine
+        # helper is a private API and has repeatedly changed compatibility
+        # with PyTorch.  PerBlockParamFakeQuantize produces one scale and zero
+        # point for every contiguous input-channel block, so its affine
+        # quantization is exactly the reshape/broadcast operation below.
+        block_size = self.block_size[1]
+        blocked_weight = self.weight.reshape(
+            self.out_features, self.in_features // block_size, block_size
+        )
+        weight_int4 = torch.round(
+            blocked_weight / linear_scale.unsqueeze(-1)
+            + linear_zero_point.unsqueeze(-1)
+        )
+        weight_int4 = weight_int4.clamp(-7, 7).reshape_as(self.weight).to(torch.int8)
 
         # LPBQ Scale Quantization
         # Quantize fp32 scale to uint4 scale

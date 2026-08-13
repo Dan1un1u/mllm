@@ -13,8 +13,13 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--max-new-tokens", type=int, default=64)
     args = parser.parse_args()
-    with args.input.open(newline="") as stream:
-        rows = list(csv.DictReader(stream))
+    raw = args.input.read_bytes()
+    nul_byte_count = raw.count(b"\0")
+    # A severely degraded experimental model can emit token text containing
+    # NUL. Preserve that fact in the result, but sanitize only the parser view
+    # so a no-accuracy-gate baseline still completes its structural audit.
+    text = raw.decode("utf-8", errors="replace").replace("\0", "�")
+    rows = list(csv.DictReader(text.splitlines()))
     if not rows:
         raise ValueError("accuracy result CSV is empty")
     required = {"id", "match_mode", "expected", "output", "normalized_output", "pass"}
@@ -66,6 +71,8 @@ def main():
         "passed": passed,
         "total": len(cases),
         "accuracy_percent": accuracy,
+        "nul_byte_count": nul_byte_count,
+        "structurally_parseable": True,
         "risk": risk,
         "interpretation": interpretation,
         "categories": category_stats,

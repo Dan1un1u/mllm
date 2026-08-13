@@ -1,13 +1,6 @@
 import torch
+import torch.nn as nn
 from typing import Tuple
-from torchao.quantization.pt2e import UniformQuantizationObserverBase
-from torchao.quantization.pt2e import FakeQuantize, MappingType, PerBlock
-from torchao.quantization.pt2e._affine_quantization import (
-    _get_reduction_params,
-    AffineQuantizedMinMaxObserver,
-    choose_qparams_affine_with_min_max,
-)
-from torchao.quantization.quant_primitives import _fake_quantize_affine
 
 
 # Copyright (c) Qualcomm Innovation Center, Inc.
@@ -15,7 +8,7 @@ from torchao.quantization.quant_primitives import _fake_quantize_affine
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-class PerBlockParamObserver(AffineQuantizedMinMaxObserver):
+class PerBlockParamObserver(nn.Module):
     def __init__(
         self,
         dtype: torch.dtype,
@@ -25,17 +18,12 @@ class PerBlockParamObserver(AffineQuantizedMinMaxObserver):
         eps=torch.finfo(torch.float32).eps,  # noqa: B008
         **kwargs,
     ):
-        super().__init__(
-            mapping_type=MappingType.SYMMETRIC,
-            target_dtype=dtype,
-            granularity=PerBlock,
-            quant_min=quant_min,
-            quant_max=quant_max,
-            eps=eps,
-            **kwargs,
-        )
+        super().__init__()
         self.dtype = dtype
         self.block_size = block_size
+        self.quant_min = quant_min
+        self.quant_max = quant_max
+        self.eps = eps
         # TODO: expand this when QNN starts to support more configurations
         self.bitwidth_of_scale = 4
         self.num_steps = 2**self.bitwidth_of_scale
@@ -47,12 +35,17 @@ class PerBlockParamObserver(AffineQuantizedMinMaxObserver):
 
         input_detached = input.detach()
         self.original_dtype = input_detached.dtype
-        shape_for_reduction, reduction_dims = _get_reduction_params(
-            self.block_size, input_detached.size()
-        )
-        input_detached = input_detached.view(shape_for_reduction)
-        min_val = torch.amin(input_detached, dim=reduction_dims)
-        max_val = torch.amax(input_detached, dim=reduction_dims)
+        if len(self.block_size) != 2 or self.block_size[0] != 1:
+            raise ValueError(f"Unsupported LPBQ block shape: {self.block_size}")
+        block = self.block_size[1]
+        if input_detached.ndim != 2 or input_detached.shape[1] % block != 0:
+            raise ValueError(
+                f"Expected [out, in] weight divisible by block {block}, "
+                f"got {tuple(input_detached.shape)}"
+            )
+        blocked = input_detached.reshape(input_detached.shape[0], -1, block)
+        min_val = torch.amin(blocked, dim=-1)
+        max_val = torch.amax(blocked, dim=-1)
         if not hasattr(self, "min_val") or not hasattr(self, "max_val"):
             self.min_val = min_val
             self.max_val = max_val
@@ -75,23 +68,15 @@ class PerBlockParamObserver(AffineQuantizedMinMaxObserver):
         assert hasattr(self, "min_val") and hasattr(self, "max_val"), (
             "Expecting the observer has min_val and max_val, please run the observer before calling calculate_qparams"
         )
-        return choose_qparams_affine_with_min_max(
-            self.min_val,
-            self.max_val,
-            self.mapping_type,
-            [],
-            self.target_dtype,
-            self.quant_min,
-            self.quant_max,
-            self.eps,
-            self.scale_dtype,
-            self.zero_point_dtype,
-            self.preserve_zero,
-            self.zero_point_domain,
+        denominator = float(max(abs(self.quant_min), abs(self.quant_max)))
+        scale = torch.maximum(
+            torch.maximum(self.min_val.abs(), self.max_val.abs()) / denominator,
+            torch.as_tensor(self.eps, device=self.min_val.device),
         )
+        return scale.to(torch.float32), torch.zeros_like(scale, dtype=torch.int32)
 
 
-class PerBlockParamFakeQuantize(FakeQuantize):
+class PerBlockParamFakeQuantize(nn.Module):
     def __init__(
         self,
         dtype: torch.dtype = torch.int8,
@@ -119,23 +104,35 @@ class PerBlockParamFakeQuantize(FakeQuantize):
         self.quant_min = quant_min if quant_min is not None else torch.iinfo(dtype).min
         self.quant_max = quant_max if quant_max is not None else torch.iinfo(dtype).max
         self.eps = eps
+        self.observer_enabled = True
+        self.fake_quant_enabled = True
+
+    def enable_observer(self):
+        self.observer_enabled = True
+
+    def disable_observer(self):
+        self.observer_enabled = False
+
+    def enable_fake_quant(self):
+        self.fake_quant_enabled = True
+
+    def disable_fake_quant(self):
+        self.fake_quant_enabled = False
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.numel() == 0:
             return x
 
-        self.activation_post_process(x)
+        if self.observer_enabled:
+            self.activation_post_process(x)
         scale, zero_point = self.activation_post_process.calculate_qparams()
-
-        return _fake_quantize_affine(
-            x,
-            self.block_size,
-            scale,
-            zero_point,
-            quant_dtype=self.dtype,
-            quant_min=self.quant_min,
-            quant_max=self.quant_max,
-        )
+        if not self.fake_quant_enabled:
+            return x
+        block = self.block_size[1]
+        blocked = x.reshape(x.shape[0], x.shape[1] // block, block)
+        quantized = torch.round(blocked / scale.unsqueeze(-1) + zero_point.unsqueeze(-1))
+        quantized = quantized.clamp(self.quant_min, self.quant_max)
+        return ((quantized - zero_point.unsqueeze(-1)) * scale.unsqueeze(-1)).reshape_as(x)
 
     def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.activation_post_process.calculate_qparams()
@@ -144,7 +141,7 @@ class PerBlockParamFakeQuantize(FakeQuantize):
         self.activation_post_process.convert(model, observer_node)
 
 
-class ConcatObserver(UniformQuantizationObserverBase):
+class ConcatObserver(nn.Module):
     """
     Fetch maximum data range of all tensors to be concatenated
     """
@@ -161,17 +158,12 @@ class ConcatObserver(UniformQuantizationObserverBase):
         is_dynamic=False,
         **kwargs,
     ) -> None:
-        super().__init__(
-            dtype=dtype,
-            qscheme=qscheme,
-            reduce_range=reduce_range,
-            quant_min=quant_min,
-            quant_max=quant_max,
-            factory_kwargs=factory_kwargs,
-            eps=eps,
-            is_dynamic=is_dynamic,
-            **kwargs,
-        )
+        super().__init__()
+        self.dtype = dtype
+        self.qscheme = qscheme
+        self.quant_min = 0 if quant_min is None else quant_min
+        self.quant_max = torch.iinfo(dtype).max if quant_max is None else quant_max
+        self.eps = eps
 
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.register_buffer("min_val", torch.tensor(float("inf"), **factory_kwargs))
@@ -195,4 +187,12 @@ class ConcatObserver(UniformQuantizationObserverBase):
         return x_orig
 
     def calculate_qparams(self):
-        return self._calculate_qparams(self.min_val, self.max_val)
+        min_val = torch.minimum(self.min_val, torch.zeros_like(self.min_val))
+        max_val = torch.maximum(self.max_val, torch.zeros_like(self.max_val))
+        scale = torch.maximum(
+            (max_val - min_val) / float(self.quant_max - self.quant_min),
+            torch.as_tensor(self.eps, device=min_val.device),
+        )
+        zero_point = self.quant_min - torch.round(min_val / scale)
+        zero_point = zero_point.clamp(self.quant_min, self.quant_max).to(torch.int32)
+        return scale.reshape(1).to(torch.float32), zero_point.reshape(1)

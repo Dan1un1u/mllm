@@ -8,12 +8,24 @@
 
 namespace qwen3_qnn_aot {
 
+#ifdef MLLM_QWEN3_QNN_AOT_G32
+inline constexpr float kCausalMaskScale = 0.001 / 255.f;
+inline constexpr int kCausalMaskZeroPoint = 255;
+inline constexpr mllm::DataTypes kCausalMaskStorageType = mllm::kUInt8;
+inline constexpr mllm::DataTypes kCausalMaskQuantType = mllm::kUInt8PerTensorAsy;
+#else
+inline constexpr float kCausalMaskScale = 0.001 / 65535.f;
+inline constexpr int kCausalMaskZeroPoint = 65535;
+inline constexpr mllm::DataTypes kCausalMaskStorageType = mllm::kUInt16;
+inline constexpr mllm::DataTypes kCausalMaskQuantType = mllm::kUInt16PerTensorAsy;
+#endif
+
 template <typename ParamsT>
 inline void addCausalMaskParams(const ParamsT& params) {
-  params->push("causal_mask.scale", mllm::Tensor::constant(0.001 / 65535.f, mllm::kFloat32));
-  params->push("causal_mask.zero_point", mllm::Tensor::constant(65535, mllm::kInt32));
-  params->push("constant_zero.scale", mllm::Tensor::constant(0.001 / 65535.f, mllm::kFloat32));
-  params->push("constant_zero.zero_point", mllm::Tensor::constant(65535, mllm::kInt32));
+  params->push("causal_mask.scale", mllm::Tensor::constant(kCausalMaskScale, mllm::kFloat32));
+  params->push("causal_mask.zero_point", mllm::Tensor::constant(kCausalMaskZeroPoint, mllm::kInt32));
+  params->push("constant_zero.scale", mllm::Tensor::constant(kCausalMaskScale, mllm::kFloat32));
+  params->push("constant_zero.zero_point", mllm::Tensor::constant(kCausalMaskZeroPoint, mllm::kInt32));
 }
 
 template <typename ParamsT>
@@ -22,8 +34,8 @@ inline std::unordered_map<std::string, mllm::Tensor> makeTraceInputs(int seq_len
                                                                      const mllm::models::qwen3::Qwen3Config& model_cfg,
                                                                      const ParamsT& params) {
   auto sequence = mllm::Tensor::zeros({1, seq_len}, mllm::kInt32);
-  auto causal_mask = mllm::Tensor::zeros({1, 1, seq_len, context_len}, mllm::kUInt16);
-  causal_mask = causal_mask.__unsafeSetDType(mllm::kUInt16PerTensorAsy);
+  auto causal_mask = mllm::Tensor::zeros({1, 1, seq_len, context_len}, kCausalMaskStorageType);
+  causal_mask = causal_mask.__unsafeSetDType(kCausalMaskQuantType);
   causal_mask.attach("scale", params->pull("causal_mask.scale").impl(), true);
   causal_mask.attach("zero_point", params->pull("causal_mask.zero_point").impl(), true);
 

@@ -150,6 +150,7 @@ enum NodeKind : uint32_t {
   RK_Attr_BuiltinIRAttr_VectorFP32Attr,
   RK_Attr_BuiltinIRAttr_VectorInt16Attr,
   RK_Attr_BuiltinIRAttr_VectorUInt16Attr,
+  RK_Attr_BuiltinIRAttr_VectorUInt8Attr,
   RK_Attr_BuiltinIRAttr_Last,
   RK_Attr_ControlFlowIRAttr,
   RK_Attr_ProgramIRAttr,

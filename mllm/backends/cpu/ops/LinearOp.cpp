@@ -364,6 +364,11 @@ void CPULinearOp::reshape(const std::vector<Tensor>& inputs, std::vector<Tensor>
       o_dtype = kUInt16PerTensorAsy;
       break;
     }
+    case aops::LinearImplTypes::kQNN_LPBQ_w4a8o8_G32: {
+      if (o_shape[0] == 1) { o_shape.erase(o_shape.begin()); }
+      o_dtype = kUInt8PerTensorAsy;
+      break;
+    }
     default: o_dtype = i.dtype();
   }
 

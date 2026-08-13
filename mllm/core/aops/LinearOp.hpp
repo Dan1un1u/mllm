@@ -49,6 +49,7 @@ enum class LinearImplTypes {
   kQNN_tensor_symm_w8a16,
   kQNN_tensor_symm_w8a8,
   kQNN_LPBQ_w4a16o16_G32,
+  kQNN_LPBQ_w4a8o8_G32,
   kQNN_LPBQ_w4a16o16_G64,
   kQNN_End,
 
@@ -100,6 +101,7 @@ inline LinearImplTypes str2LinearImplTypes(const std::string& str) {
       {"QNN Linear per-tensor symmectrical W8A16", LinearImplTypes::kQNN_tensor_symm_w8a16},
       {"QNN Linear per-tensor symmectrical W8A8", LinearImplTypes::kQNN_tensor_symm_w8a8},
       {"QNN_LPBQ_w4a16o16_G32", LinearImplTypes::kQNN_LPBQ_w4a16o16_G32},
+      {"QNN_LPBQ_w4a8o8_G32", LinearImplTypes::kQNN_LPBQ_w4a8o8_G32},
       {"QNN_LPBQ_w4a16o16_G64", LinearImplTypes::kQNN_LPBQ_w4a16o16_G64},
   };
 
@@ -155,6 +157,7 @@ inline std::string LinearImplTypes2Str(LinearImplTypes type) {
       {LinearImplTypes::kQNN_tensor_symm_w8a16, "QNN Linear per-tensor symmectrical W8A16"},
       {LinearImplTypes::kQNN_tensor_symm_w8a8, "QNN Linear per-tensor symmectrical W8A8"},
       {LinearImplTypes::kQNN_LPBQ_w4a16o16_G32, "QNN_LPBQ_w4a16o16_G32"},
+      {LinearImplTypes::kQNN_LPBQ_w4a8o8_G32, "QNN_LPBQ_w4a8o8_G32"},
       {LinearImplTypes::kQNN_LPBQ_w4a16o16_G64, "QNN_LPBQ_w4a16o16_G64"},
   };
 

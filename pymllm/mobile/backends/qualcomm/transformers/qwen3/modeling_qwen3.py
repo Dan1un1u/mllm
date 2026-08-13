@@ -69,6 +69,13 @@ def normalize_qwen3_lpbq_block_size(config: Qwen3Config) -> int:
     )
 
 
+def activation_bits(config: Qwen3Config) -> int:
+    bits = getattr(config, "activation_bits", None)
+    if bits not in (8, 16):
+        raise ValueError("Qwen3 Qualcomm quantization requires activation_bits=8 or 16")
+    return bits
+
+
 class Qwen3MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -76,6 +83,7 @@ class Qwen3MLP(nn.Module):
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
         self.block_size = config.linear_block_size
+        self.activation_bits = activation_bits(config)
         self.gate_proj = QLinearLPBQ(
             self.hidden_size,
             self.intermediate_size,
@@ -96,16 +104,16 @@ class Qwen3MLP(nn.Module):
         )
 
         # QDQ
-        self.up_proj_input_qdq = ActivationQDQ(bits=16)
-        self.up_proj_output_qdq = ActivationQDQ(bits=16)
-        self.gate_proj_output_qdq = ActivationQDQ(bits=16)
-        self.act_output_qdq = ActivationQDQ(bits=16)
-        self.down_proj_input_qdq = ActivationQDQ(bits=16)
+        self.up_proj_input_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.up_proj_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.gate_proj_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.act_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.down_proj_input_qdq = ActivationQDQ(bits=self.activation_bits)
         # For sigmoid output: scale = 1 / (q_max - q_min + 1), zp = 0
-        # For 16-bit: q_min = 0, q_max = 65535
-        sigmoid_scale = 1.0 / (65535 - 0 + 1)  # 1 / 65536
+        quant_max = (2**self.activation_bits) - 1
+        sigmoid_scale = 1.0 / (quant_max + 1)
         self.sigmoid_output_qdq = FixedActivationQDQ(
-            scale=sigmoid_scale, zero_point=0, bits=16
+            scale=sigmoid_scale, zero_point=0, bits=self.activation_bits
         )
 
     def forward(self, x):
@@ -181,6 +189,7 @@ class Qwen3Attention(nn.Module):
         self.config = config
         self.layer_idx = layer_idx
         self.block_size = config.linear_block_size
+        self.activation_bits = activation_bits(config)
         self.head_dim = getattr(
             config, "head_dim", config.hidden_size // config.num_attention_heads
         )
@@ -228,38 +237,38 @@ class Qwen3Attention(nn.Module):
         )
 
         # QDQ
-        self.q_proj_input_qdq = ActivationQDQ(bits=16)
-        self.q_norm_input_qdq = ActivationQDQ(bits=16)
-        self.q_norm_output_qdq = ActivationQDQ(bits=16)
-        self.k_norm_input_qdq = ActivationQDQ(bits=16)
-        self.k_norm_output_qdq = ActivationQDQ(bits=16)
-        self.q_rope_mul_0_output_qdq = ActivationQDQ(bits=16)
-        self.q_rope_mul_1_output_qdq = ActivationQDQ(bits=16)
-        self.q_rope_add_0_output_qdq = ActivationQDQ(bits=16)
-        self.k_rope_mul_0_output_qdq = ActivationQDQ(bits=16)
-        self.k_rope_mul_1_output_qdq = ActivationQDQ(bits=16)
-        self.k_rope_add_0_output_qdq = ActivationQDQ(bits=16)
+        self.q_proj_input_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.q_norm_input_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.q_norm_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.k_norm_input_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.k_norm_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.q_rope_mul_0_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.q_rope_mul_1_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.q_rope_add_0_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.k_rope_mul_0_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.k_rope_mul_1_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.k_rope_add_0_output_qdq = ActivationQDQ(bits=self.activation_bits)
 
         self.q_rope_concat_observer = ConcatObserver(
             dtype=torch.int32,
             qscheme=torch.per_tensor_affine,
             reduce_range=False,
             quant_min=0,
-            quant_max=2**16 - 1,
-            eps=0.0001 / 65535,
+            quant_max=2**self.activation_bits - 1,
+            eps=0.0001 / (2**self.activation_bits - 1),
             is_dynamic=False,
         )
-        self.q_rope_neg_half_qdq = ActivationQDQ(bits=16)
+        self.q_rope_neg_half_qdq = ActivationQDQ(bits=self.activation_bits)
         self.k_rope_concat_observer = ConcatObserver(
             dtype=torch.int32,
             qscheme=torch.per_tensor_affine,
             reduce_range=False,
             quant_min=0,
-            quant_max=2**16 - 1,
-            eps=0.0001 / 65535,
+            quant_max=2**self.activation_bits - 1,
+            eps=0.0001 / (2**self.activation_bits - 1),
             is_dynamic=False,
         )
-        self.k_rope_neg_half_qdq = ActivationQDQ(bits=16)
+        self.k_rope_neg_half_qdq = ActivationQDQ(bits=self.activation_bits)
         self.k_rope_concat_observer.add_observer(
             self.k_norm_output_qdq.fake_quant.activation_post_process
         )
@@ -281,16 +290,16 @@ class Qwen3Attention(nn.Module):
             bits=8, qscheme=torch.per_tensor_symmetric
         )
 
-        self.v_cast_to_int16_qdq = ActivationQDQ(bits=16)
-        self.qk_matmul_output_qdq = ActivationQDQ(bits=16)
-        self.scaling_qdq = ActivationQDQ(bits=16)
-        self.neg_20_qdq = ActivationQDQ(bits=16)
-        self.reduce_min_output_qdq = ActivationQDQ(bits=16)
-        self.mul_0_output_qdq = ActivationQDQ(bits=16)
-        self.minus_0_output_qdq = ActivationQDQ(bits=16)
-        self.softmax_output_qdq = ActivationQDQ(bits=16)
-        self.attn_value_matmul_output_qdq = ActivationQDQ(bits=16)
-        self.where_attn_qdq = ActivationQDQ(bits=16)
+        self.v_cast_to_int16_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.qk_matmul_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.scaling_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.neg_20_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.reduce_min_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.mul_0_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.minus_0_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.softmax_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.attn_value_matmul_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.where_attn_qdq = ActivationQDQ(bits=self.activation_bits)
 
     @deprecate_kwarg("past_key_value", new_name="past_key_values", version="4.58")
     def forward(
@@ -403,6 +412,7 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
         super().__init__()
         self.layer_dix = layer_idx
         self.hidden_size = config.hidden_size
+        self.activation_bits = activation_bits(config)
 
         self.self_attn = Qwen3Attention(config=config, layer_idx=layer_idx)
 
@@ -417,10 +427,10 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
 
         # QDQ
         if self.layer_dix != 0:
-            self.input_layernorm_input_qdq = ActivationQDQ(bits=16)
-        self.add_0_lhs_input_qdq = ActivationQDQ(bits=16)
-        self.add_0_output_qdq = ActivationQDQ(bits=16)
-        self.add_1_lhs_input_qdq = ActivationQDQ(bits=16)
+            self.input_layernorm_input_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.add_0_lhs_input_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.add_0_output_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.add_1_lhs_input_qdq = ActivationQDQ(bits=self.activation_bits)
 
     @deprecate_kwarg("past_key_value", new_name="past_key_values", version="4.58")
     def forward(
@@ -537,11 +547,15 @@ class Qwen3Model(Qwen3PreTrainedModel):
     def __init__(self, config: Qwen3Config):
         super().__init__(config)
         normalize_qwen3_lpbq_block_size(config)
+        self.activation_bits = activation_bits(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
         self.embed_tokens = QEmbedding(
             config.vocab_size, config.hidden_size, self.padding_idx, quant_bits=16
         )
+        # Embedding storage remains UInt16, while its gathered values are model
+        # activations and therefore follow the selected activation precision.
+        self.embed_tokens_output_qdq = ActivationQDQ(bits=self.activation_bits)
         self.layers = nn.ModuleList(
             [
                 Qwen3DecoderLayer(config, layer_idx)
@@ -556,9 +570,9 @@ class Qwen3Model(Qwen3PreTrainedModel):
         # Register sin and cos as buffers
         self.register_buffer("mllm_max_sin_embedding", None)
         self.register_buffer("mllm_max_cos_embedding", None)
-        self.sin_embedding_input_qdq = ActivationQDQ(bits=16)
-        self.cos_embedding_input_qdq = ActivationQDQ(bits=16)
-        self.norm_input_qdq = ActivationQDQ(bits=16)
+        self.sin_embedding_input_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.cos_embedding_input_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.norm_input_qdq = ActivationQDQ(bits=self.activation_bits)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -578,12 +592,13 @@ class Qwen3Model(Qwen3PreTrainedModel):
         sin_int = torch.round(
             self.mllm_max_sin_embedding / sin_scale + sin_zero_point
         ).clamp(sin_quant_min, sin_quant_max)
-        self.mllm_max_sin_embedding = sin_int.to(torch.uint16)
+        deploy_dtype = torch.uint8 if self.activation_bits == 8 else torch.uint16
+        self.mllm_max_sin_embedding = sin_int.to(deploy_dtype)
 
         cos_int = torch.round(
             self.mllm_max_cos_embedding / cos_scale + cos_zero_point
         ).clamp(cos_quant_min, cos_quant_max)
-        self.mllm_max_cos_embedding = cos_int.to(torch.uint16)
+        self.mllm_max_cos_embedding = cos_int.to(deploy_dtype)
 
     @check_model_inputs()
     @auto_docstring
@@ -604,7 +619,7 @@ class Qwen3Model(Qwen3PreTrainedModel):
             )
 
         if inputs_embeds is None:
-            inputs_embeds = self.embed_tokens(input_ids)
+            inputs_embeds = self.embed_tokens_output_qdq(self.embed_tokens(input_ids))
 
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache(config=self.config)
@@ -722,6 +737,7 @@ class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
         self.model = Qwen3Model(config)
         self.vocab_size = config.vocab_size
         self.block_size = config.linear_block_size
+        self.activation_bits = activation_bits(config)
         self.lm_head = QLinearLPBQ(
             config.hidden_size,
             config.vocab_size,
@@ -730,8 +746,8 @@ class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
         )
         self.mllm_qualcomm_max_length = None
 
-        self.lm_head_input_qdq = ActivationQDQ(bits=16)
-        self.lm_head_output_qdq = ActivationQDQ(bits=16)
+        self.lm_head_input_qdq = ActivationQDQ(bits=self.activation_bits)
+        self.lm_head_output_qdq = ActivationQDQ(bits=self.activation_bits)
 
         # Initialize weights and apply final processing
         self.post_init()

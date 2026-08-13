@@ -1,8 +1,12 @@
+import hashlib
+import json
+from pathlib import Path
+
 import torch
 from tqdm import tqdm
 from importlib.metadata import PackageNotFoundError, version
 from packaging.version import Version
-from transformers import AutoTokenizer
+from transformers import AutoConfig, AutoTokenizer
 from pymllm.mobile.backends.qualcomm.transformers.core.qdq import (
     ActivationQDQ,
     FixedActivationQDQ,
@@ -211,10 +215,24 @@ def _check_datasets_compatibility():
         )
         
 class Qwen3Quantizer:
-    def __init__(self, model_path: str, mllm_qualcomm_max_length=2048):
+    def __init__(
+        self,
+        model_path: str,
+        mllm_qualcomm_max_length=2048,
+        activation_bits: int = 8,
+        linear_block_size: int = 32,
+    ):
+        if activation_bits not in (8, 16):
+            raise ValueError("activation_bits must be 8 or 16")
+        if linear_block_size <= 0:
+            raise ValueError("linear_block_size must be positive")
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        config = AutoConfig.from_pretrained(model_path)
+        config.activation_bits = activation_bits
+        config.linear_block_size = linear_block_size
         self.model = Qwen3ForCausalLM.from_pretrained(
             model_path,
+            config=config,
             attn_implementation="eager",
             dtype=torch.float32,
         )
@@ -303,7 +321,45 @@ class Qwen3Quantizer:
         print("thinking content:", thinking_content)
         print("content:", content)
 
-    def calibrate(self, num_samples=64, max_seq_length=512):
+    def capture_calibration_corpus(
+        self, output_path: str, num_samples=128, max_seq_length=512
+    ):
+        """Capture the exact text and token IDs used by formal calibration."""
+        _check_datasets_compatibility()
+        from datasets import load_dataset
+
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        dataset = load_dataset("wikitext", "wikitext-103-v1", split="train")
+        records = []
+        for entry in dataset:
+            source_text = entry["text"].strip()
+            if len(source_text) < 1024:
+                continue
+            model_inputs = self._build_model_inputs(source_text, max_length=max_seq_length)
+            records.append(
+                {
+                    "index": len(records),
+                    "source": "huggingface/wikitext:wikitext-103-v1:train",
+                    "text": source_text,
+                    "input_ids": model_inputs.input_ids[0].cpu().tolist(),
+                    "attention_mask": model_inputs.attention_mask[0].cpu().tolist(),
+                }
+            )
+            if len(records) == num_samples:
+                break
+        if len(records) != num_samples:
+            raise RuntimeError(f"Captured {len(records)} samples, expected {num_samples}")
+        serialized = "".join(
+            json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+            for record in records
+        )
+        output.write_text(serialized, encoding="utf-8")
+        digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+        print(f"Captured calibration corpus: {output} sha256={digest}")
+        return digest
+
+    def calibrate(self, calibration_corpus: str, num_samples=128, max_seq_length=512):
         """
         Perform calibration using Wikipedia dataset (PTQ)
         :param num_samples: Number of samples for calibration
@@ -317,17 +373,12 @@ class Qwen3Quantizer:
         self.enable_activation_update()
         self.model.eval()
 
-        # 2. Load Wikipedia dataset (English version example)
-        # Use streaming=True to download and process on the fly, without downloading the full几十G dataset
-        _check_datasets_compatibility()
-        from modelscope.msdatasets import MsDataset
-        
-        dataset = MsDataset.load(
-            "modelscope/wikitext",
-            subset_name="wikitext-103-v1",
-            split="train",
-            trust_remote_code=True,
-        )
+        corpus_path = Path(calibration_corpus)
+        records = [json.loads(line) for line in corpus_path.read_text(encoding="utf-8").splitlines()]
+        if len(records) != num_samples:
+            raise RuntimeError(
+                f"Pinned calibration corpus has {len(records)} samples; expected {num_samples}"
+            )
 
         # 3. Execute forward pass (Prefill stage)
         samples_processed = 0
@@ -335,27 +386,27 @@ class Qwen3Quantizer:
         # Ensure no gradient calculation during inference
         with torch.no_grad():
             pbar = tqdm(total=num_samples, desc="Calibrating")
-            for entry in dataset:
-                if samples_processed >= num_samples:
-                    break
-
-                if len(entry["text"].strip()) < 1024:
-                    continue
-
-                model_inputs = self._build_model_inputs(
-                    entry["text"], max_length=max_seq_length
-                )
+            for expected_index, entry in enumerate(records):
+                if entry.get("index") != expected_index:
+                    raise RuntimeError("Calibration corpus indices are not contiguous")
+                input_ids = entry.get("input_ids", [])
+                attention_mask = entry.get("attention_mask", [])
+                if not input_ids or len(input_ids) != len(attention_mask):
+                    raise RuntimeError(f"Invalid token record at index {expected_index}")
+                if len(input_ids) > max_seq_length:
+                    raise RuntimeError(
+                        f"Pinned sample {expected_index} exceeds max_seq_length={max_seq_length}"
+                    )
+                model_inputs = {
+                    "input_ids": torch.tensor([input_ids], dtype=torch.long, device=self.model.device),
+                    "attention_mask": torch.tensor(
+                        [attention_mask], dtype=torch.long, device=self.model.device
+                    ),
+                }
 
                 # Only need Prefill stage: directly call forward
                 # This will trigger observer update statistics in ActivationQDQ
-                self.model.generate(
-                    **model_inputs,
-                    max_new_tokens=1,
-                    do_sample=False,
-                    temperature=None,
-                    top_p=None,
-                    top_k=None,
-                )
+                self.model(**model_inputs, use_cache=False)
 
                 samples_processed += 1
                 pbar.update(1)

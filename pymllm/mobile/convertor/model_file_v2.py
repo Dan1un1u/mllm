@@ -112,7 +112,7 @@ class ModelFileV2:
             )
         self.v2_param_descriptor: List[ModelFileV2ParamsDescriptor] = []
         self.v2_file_header = ModelFileV2Descriptor(
-            model_name="",
+            model_name=model_name,
             num_params=0
             if update_mode == "Static"
             else self.max_params_descriptor_buffer_num,
@@ -159,7 +159,7 @@ class ModelFileV2:
 
         tensor_size = len(tensor_data)
 
-        assert len(self.v2_param_descriptor) <= self.max_params_descriptor_buffer_num
+        assert len(self.v2_param_descriptor) < self.max_params_descriptor_buffer_num
         desc = ModelFileV2ParamsDescriptor(
             param_id=len(self.v2_param_descriptor),
             param_type=true_dtype,

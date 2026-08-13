@@ -205,21 +205,25 @@ void _recursiveSolveNormalImpl(const ir::IRContext::ptr_t& ctx, const ir::Val::p
           auto ci = constant_ir->cast_<ir::VectorFP32Attr>();
           ci->data()[0] = ptq_constant_v;
 
-          // FIXME: We hard code uint16 here.
-          tv->tensor_ = Tensor::ones({1}, kUInt16, kCPU);
-          tv->tensor_ = tv->tensor_.__unsafeSetDType(kUInt16PerTensorAsy);
-          tv->tensor_.at<mllm_uint16_t>({0}) = ptq_constant_v;
         } else if (constant_ir->isa_<ir::VectorInt16Attr>()) {
           auto ci = constant_ir->cast_<ir::VectorInt16Attr>();
           ci->data()[0] = ptq_constant_v;
 
-          // FIXME: We hard code uint16 here.
-          tv->tensor_ = Tensor::ones({1}, kUInt16, kCPU);
-          tv->tensor_ = tv->tensor_.__unsafeSetDType(kUInt16PerTensorAsy);
-          tv->tensor_.at<mllm_uint16_t>({0}) = ptq_constant_v;
         }
 
-        auto _attr = ctx->create<ir::VectorUInt16Attr>(std::vector<uint16_t>{(uint16_t)ptq_constant_v});
+        std::shared_ptr<ir::Attr> _attr;
+        if (this_spec->quant_to_type == kUInt8) {
+          tv->tensor_ = Tensor::ones({1}, kUInt8, kCPU).__unsafeSetDType(kUInt8PerTensorAsy);
+          tv->tensor_.at<mllm_uint8_t>({0}) = static_cast<mllm_uint8_t>(ptq_constant_v);
+          _attr = ctx->create<ir::VectorUInt8Attr>(std::vector<uint8_t>{static_cast<uint8_t>(ptq_constant_v)});
+        } else if (this_spec->quant_to_type == kUInt16) {
+          tv->tensor_ = Tensor::ones({1}, kUInt16, kCPU).__unsafeSetDType(kUInt16PerTensorAsy);
+          tv->tensor_.at<mllm_uint16_t>({0}) = static_cast<mllm_uint16_t>(ptq_constant_v);
+          _attr =
+              ctx->create<ir::VectorUInt16Attr>(std::vector<uint16_t>{static_cast<uint16_t>(ptq_constant_v)});
+        } else {
+          NYI("Asymmetric constant storage type is not implemented");
+        }
         tv->removeAttr("constant");
         tv->setAttr("constant", _attr);
 

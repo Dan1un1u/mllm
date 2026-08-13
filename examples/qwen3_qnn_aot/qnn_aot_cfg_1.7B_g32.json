@@ -22,7 +22,7 @@
                 "fallback": {
                     "method": "LPBQ",
                     "sym": true,
-                    "precision": "w4a16",
+                    "precision": "w4a8",
                     "block_size": 32
                 }
             },
@@ -30,7 +30,7 @@
                 "fallback": {
                     "method": "LPBQ",
                     "sym": true,
-                    "precision": "w4a16",
+                    "precision": "w4a8",
                     "block_size": 32
                 }
             },

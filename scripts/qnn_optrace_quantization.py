@@ -372,7 +372,7 @@ def write_html(path, model_id, runtime_rows, stage_rows, graphs, tensors, graph_
 <h2>Qwen3 structure × quantization phase</h2>{stage_table}
 <h2>Compile-time dtype / encoding manifest</h2>{manifest_tables}
 <h2>Interpretation boundaries</h2>
-<ul><li><b>Logical W4A16O16 G16</b> is a model/recipe property. The HTP trace may show <code>QInt8</code> because V79 expands block-scaled W4 weights into an internal per-channel int8 form before HMX.</li><li>A missing standalone Quantize/Dequantize op does not imply zero conversion cost: QNN can fuse Q/DQ into a consumer. The report measures visible lowered kernels and labels fused boundaries separately in the manifest.</li><li><code>Step Size</code> and <code>Zero Offset</code> in Optrace describe the physical HTP tensor. The manifest's scale/zero-point describe the pre-finalize QNN tensor; both are retained because lowering may transform them.</li></ul>
+<ul><li><b>Logical W4A8O8 G32</b> is a model/recipe property. The HTP trace may show <code>QInt8</code> because V79 expands block-scaled W4 weights into an internal per-channel int8 form before HMX.</li><li>A missing standalone Quantize/Dequantize op does not imply zero conversion cost: QNN can fuse Q/DQ into a consumer. The report measures visible lowered kernels and labels fused boundaries separately in the manifest.</li><li><code>Step Size</code> and <code>Zero Offset</code> in Optrace describe the physical HTP tensor. The manifest's scale/zero-point describe the pre-finalize QNN tensor; both are retained because lowering may transform them.</li></ul>
 </body></html>""", encoding="utf-8")
 
 

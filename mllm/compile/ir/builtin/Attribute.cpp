@@ -132,4 +132,21 @@ VectorUInt16Attr::ptr_t VectorUInt16Attr::build(IRContext*, const std::vector<ui
   return ret;
 }
 
+VectorUInt8Attr::VectorUInt8Attr() : BuiltinIRAttr(RK_Attr_BuiltinIRAttr_VectorUInt8Attr) {}
+
+VectorUInt8Attr::VectorUInt8Attr(const NodeKind& kind) : BuiltinIRAttr(kind) {}
+
+void VectorUInt8Attr::dump(IRPrinter& p) {
+  std::vector<uint16_t> printable(data().begin(), data().end());
+  p.print("{}", printable);
+}
+
+std::vector<uint8_t>& VectorUInt8Attr::data() { return data_; }
+
+VectorUInt8Attr::ptr_t VectorUInt8Attr::build(IRContext*, const std::vector<uint8_t>& data) {
+  auto ret = std::make_shared<VectorUInt8Attr>();
+  ret->data() = data;
+  return ret;
+}
+
 }  // namespace mllm::ir

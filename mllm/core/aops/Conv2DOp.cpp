@@ -78,6 +78,7 @@ void Conv2DOp::reshape(const std::vector<Tensor>& inputs, std::vector<Tensor>& o
 
   // CHECK if in Qualcomm DSP shape. Inputs is [N, H, W, C], Filter Weight is [N, H, In, Out]
   if (options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G32
+      || options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a8o8_G32
       || options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G64
       || options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G16) {
     in_channels = ishape[3];
@@ -113,6 +114,7 @@ void Conv2DOp::reshape(const std::vector<Tensor>& inputs, std::vector<Tensor>& o
   auto new_shape = std::vector<int32_t>{batch, out_channels, h_out, w_out};
 
   if (options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G32
+      || options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a8o8_G32
       || options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G64
       || options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G16) {
     new_shape = std::vector<int32_t>{batch, h_out, w_out, out_channels};

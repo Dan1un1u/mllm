@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Standalone Qwen3-1.7B G32 profiling solution for SM8750/V79.
+# Standalone Qwen3-1.7B W4A8G32 profiling solution for SM8750/V79.
 #
 # This file intentionally has its own G32 defaults.  It must not silently
 # inherit the native G16 context/configuration from the original script.
@@ -24,20 +24,25 @@ CONTRACT_FILE="${CONTRACT_FILE:-${REPO_ROOT}/profiles/qwen3_sm8750_v79_g32/basel
 }
 # shellcheck disable=SC1090
 source "${CONTRACT_FILE}"
-# Host-side models/results are siblings of the repository.  This keeps the
-# baseline runnable after moving the complete llm_exp tree to another host.
-ARTIFACT_ROOT="${ARTIFACT_ROOT:-$(cd "${REPO_ROOT}/.." && pwd)}"
+# Formal models, intermediates, and results live outside Git by contract.
+ARTIFACT_ROOT="${ARTIFACT_ROOT:-/mnt/d/llm_exp}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 
 RESULTS_BASE="${RESULTS_BASE:-${ARTIFACT_ROOT}/results}"
-RESULT_ROOT="${RESULTS_BASE}/qwen3_sm8750_v79_g32_${TIMESTAMP}"
-REMOTE_DIR="${REMOTE_DIR:-/data/local/tmp}"
+RESUME_RESULT_ROOT="${RESUME_RESULT_ROOT:-}"
+if [[ -n "${RESUME_RESULT_ROOT}" ]]; then
+    RESULT_ROOT="${RESUME_RESULT_ROOT}"
+    TIMESTAMP="${RESULT_ROOT##*w4a8g32_}"
+else
+    RESULT_ROOT="${RESULTS_BASE}/qwen3_sm8750_v79_w4a8g32_${TIMESTAMP}"
+fi
+REMOTE_DIR="${REMOTE_DIR:-/data/local/tmp/mllm_w4a8g32}"
 REMOTE_ROOT="${REMOTE_ROOT:-${REMOTE_DIR}/qwen3_sm8750_v79_g32_profile_${TIMESTAMP}}"
 ADB_SERIAL="${ADB_SERIAL:-}"
 MODEL_ROOT="${MODEL_ROOT:-${ARTIFACT_ROOT}/models}"
 ADB_BIN="${ADB_BIN:-adb}"
 
-# Keep the archived baseline identity explicit in every result.  This script
+# Keep the candidate baseline identity explicit in every result.  This script
 # is intentionally not a generic scheme dispatcher.
 PROFILE_SCHEME="${BASELINE_PROFILE_SCHEME}"
 PROFILE_WRAPPER="${PROFILE_WRAPPER:-${BASH_SOURCE[0]}}"
@@ -58,14 +63,20 @@ REMOTE_TOKENIZER="${BASELINE_REMOTE_TOKENIZER}"
 REMOTE_CONFIG="${BASELINE_REMOTE_CONFIG}"
 
 LOCAL_BUILD_BIN="${LOCAL_BUILD_BIN:-${REPO_ROOT}/build-android-arm64-v8a-qnn/bin}"
+ANDROID_NDK_PATH="${ANDROID_NDK_PATH:-${ANDROID_NDK_ROOT:-}}"
+LOCAL_LIBOMP="${LOCAL_LIBOMP:-${ANDROID_NDK_PATH:+${ANDROID_NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/17/lib/linux/aarch64/libomp.so}}"
+QAIRT_ANDROID_LIB="${QAIRT_ANDROID_LIB:-${QAIRT_SDK_ROOT}/lib/aarch64-android}"
+QAIRT_V79_LIB="${QAIRT_V79_LIB:-${QAIRT_SDK_ROOT}/lib/hexagon-v79/unsigned}"
+LLAMA_PACKAGE_BUILD="${LLAMA_PACKAGE_BUILD:-${REPO_ROOT}/mllm/backends/qnn/custom-op-package/LLaMAPackage/build}"
 LOCAL_RUNNER="${LOCAL_RUNNER:-${REPO_ROOT}/${BASELINE_RUNNER_REL}}"
 LOCAL_MODEL="${LOCAL_MODEL:-${MODEL_ROOT}/${BASELINE_MODEL_REL}}"
 LOCAL_TOKENIZER="${LOCAL_TOKENIZER:-${MODEL_ROOT}/${BASELINE_TOKENIZER_REL}}"
 LOCAL_CONFIG="${LOCAL_CONFIG:-${REPO_ROOT}/${BASELINE_CONFIG_REL}}"
 ACCURACY_SUITE="${ACCURACY_SUITE:-${REPO_ROOT}/${BASELINE_ACCURACY_SUITE_REL}}"
 SCHEMATIC_DIR="${SCHEMATIC_DIR:-${MODEL_ROOT}/${BASELINE_SCHEMATIC_REL}}"
+MANIFEST_DIR="${MANIFEST_DIR:-${MODEL_ROOT}/${BASELINE_MANIFEST_REL}}"
 
-# These values are fixed by the archived contract.  Changing a pinned data
+# These values are fixed by the candidate contract.  Changing a pinned data
 # artifact creates a new baseline; it must not silently reuse this result
 # name.  The runner digest is retained as reference provenance only: this
 # WSL build may differ because the ELF embeds source/debug paths and commit
@@ -105,7 +116,11 @@ if (( ACCURACY_MAX_NEW_TOKENS < 32 )); then
 fi
 command -v "${ADB_BIN}" >/dev/null || die "${ADB_BIN} is not in PATH"
 command -v python3 >/dev/null || die "python3 is not in PATH"
-[[ ! -e "${RESULT_ROOT}" ]] || die "timestamped result directory already exists: ${RESULT_ROOT}"
+if [[ -n "${RESUME_RESULT_ROOT}" ]]; then
+    [[ -d "${RESULT_ROOT}" ]] || die "resume result directory does not exist: ${RESULT_ROOT}"
+else
+    [[ ! -e "${RESULT_ROOT}" ]] || die "timestamped result directory already exists: ${RESULT_ROOT}"
+fi
 
 PROFILE_VIEWER="${QAIRT_SDK_ROOT}/bin/x86_64-linux-clang/qnn-profile-viewer"
 OPTRACE_READER="${QAIRT_SDK_ROOT}/lib/x86_64-linux-clang/libQnnHtpOptraceProfilingReader.so"
@@ -115,6 +130,14 @@ for graph in s1 s32; do
     [[ -f "${SCHEMATIC_DIR}/model.0.${graph}_schematic.bin" ]] \
         || die "schematic missing: ${SCHEMATIC_DIR}/model.0.${graph}_schematic.bin"
 done
+for graph in s1 s32; do
+    [[ -f "${MANIFEST_DIR}/model.0.${graph}_quant_manifest.json" ]] \
+        || die "quantization manifest missing: ${MANIFEST_DIR}/model.0.${graph}_quant_manifest.json"
+done
+check_sha "s1 quant manifest" "${MANIFEST_DIR}/model.0.s1_quant_manifest.json" \
+    "${BASELINE_S1_MANIFEST_SHA256}"
+check_sha "s32 quant manifest" "${MANIFEST_DIR}/model.0.s32_quant_manifest.json" \
+    "${BASELINE_S32_MANIFEST_SHA256}"
 
 ADB=("${ADB_BIN}")
 if [[ -n "${ADB_SERIAL}" ]]; then
@@ -130,6 +153,18 @@ fi
 for path in "${LOCAL_RUNNER}" "${LOCAL_MODEL}" "${LOCAL_TOKENIZER}" "${LOCAL_CONFIG}"; do
     [[ -f "${path}" ]] || die "local artifact missing: ${path}"
 done
+[[ -n "${LOCAL_LIBOMP}" && -f "${LOCAL_LIBOMP}" ]] \
+    || die "Android OpenMP runtime missing; set ANDROID_NDK_PATH or LOCAL_LIBOMP"
+for qnn_lib in libQnnHtp.so libQnnSystem.so libQnnHtpV79Stub.so \
+    libQnnHtpProfilingReader.so libQnnHtpOptraceProfilingReader.so libQnnHtpPrepare.so; do
+    [[ -f "${QAIRT_ANDROID_LIB}/${qnn_lib}" ]] || die "QAIRT Android library missing: ${qnn_lib}"
+done
+[[ -f "${QAIRT_V79_LIB}/libQnnHtpV79Skel.so" ]] \
+    || die "QAIRT V79 skel missing: ${QAIRT_V79_LIB}/libQnnHtpV79Skel.so"
+[[ -f "${LLAMA_PACKAGE_BUILD}/aarch64-android/libQnnLLaMAPackage.so" ]] \
+    || die "QNN LLaMA CPU package missing"
+[[ -f "${LLAMA_PACKAGE_BUILD}/hexagon-v79/libQnnLLaMAPackage.so" ]] \
+    || die "QNN LLaMA V79 package missing"
 [[ -f "${ACCURACY_SUITE}" ]] || die "accuracy suite missing: ${ACCURACY_SUITE}"
 LOCAL_RUNNER_SHA="$(sha256sum "${LOCAL_RUNNER}" | awk '{print $1}')"
 check_sha "tokenizer" "${LOCAL_TOKENIZER}" "${EXPECTED_TOKENIZER_SHA}"
@@ -144,16 +179,25 @@ check_sha "s32 schematic" "${SCHEMATIC_DIR}/model.0.s32_schematic.bin" \
     "${BASELINE_S32_SCHEMATIC_SHA256}"
 
 mkdir -p "${RESULT_ROOT}/benchmark" "${RESULT_ROOT}/accuracy"
-cp "${PROFILE_WRAPPER}" "${RESULT_ROOT}/experiment_script.sh"
-cp "${BASH_SOURCE[0]}" "${RESULT_ROOT}/base_profile_script.sh"
-cp "${ACCURACY_SUITE}" "${RESULT_ROOT}/accuracy/accuracy_suite.tsv"
-git -C "${REPO_ROOT}" rev-parse HEAD >"${RESULT_ROOT}/git_commit.txt"
-git -C "${REPO_ROOT}" status --short >"${RESULT_ROOT}/git_status.txt"
-sha256sum "${LOCAL_RUNNER}" "${LOCAL_MODEL}" "${LOCAL_TOKENIZER}" "${LOCAL_CONFIG}" \
-    "${ACCURACY_SUITE}" \
-    "${SCHEMATIC_DIR}/model.0.s1_schematic.bin" "${SCHEMATIC_DIR}/model.0.s32_schematic.bin" \
-    >"${RESULT_ROOT}/artifact_sha256.txt"
-"${ADB[@]}" shell getprop >"${RESULT_ROOT}/device_getprop.txt"
+if [[ -z "${RESUME_RESULT_ROOT}" ]]; then
+    cp "${PROFILE_WRAPPER}" "${RESULT_ROOT}/experiment_script.sh"
+    cp "${BASH_SOURCE[0]}" "${RESULT_ROOT}/base_profile_script.sh"
+    cp "${ACCURACY_SUITE}" "${RESULT_ROOT}/accuracy/accuracy_suite.tsv"
+    mkdir -p "${RESULT_ROOT}/manifests"
+    cp "${MANIFEST_DIR}"/*_quant_manifest.json "${RESULT_ROOT}/manifests/"
+    git -C "${REPO_ROOT}" rev-parse HEAD >"${RESULT_ROOT}/git_commit.txt"
+    # The half.hpp modification predates this baseline and belongs to the user.
+    # Preserve it without allowing it to contaminate this run's source-status proof.
+    git -C "${REPO_ROOT}" status --short -- . \
+        ':(exclude)third_party/half/include/half/half.hpp' >"${RESULT_ROOT}/git_status.txt"
+    sha256sum "${LOCAL_RUNNER}" "${LOCAL_MODEL}" "${LOCAL_TOKENIZER}" "${LOCAL_CONFIG}" \
+        "${ACCURACY_SUITE}" \
+        "${SCHEMATIC_DIR}/model.0.s1_schematic.bin" "${SCHEMATIC_DIR}/model.0.s32_schematic.bin" \
+        "${MANIFEST_DIR}/model.0.s1_quant_manifest.json" \
+        "${MANIFEST_DIR}/model.0.s32_quant_manifest.json" \
+        >"${RESULT_ROOT}/artifact_sha256.txt"
+    "${ADB[@]}" shell getprop >"${RESULT_ROOT}/device_getprop.txt"
+fi
 
 {
     echo "timestamp=${TIMESTAMP}"
@@ -183,12 +227,35 @@ sha256sum "${LOCAL_RUNNER}" "${LOCAL_MODEL}" "${LOCAL_TOKENIZER}" "${LOCAL_CONFI
     echo "prompt=${PROMPT}"
     echo "benchmark_semantics=profiling off; fresh process per round; runner-level prefill/decode E2E"
     echo "accuracy_semantics=profiling off; one Runner reused with KV reset; greedy short-answer sanity suite"
+    echo "accuracy_acceptance=informational only; no accuracy threshold"
+    echo "speed_acceptance=informational only; runner E2E CSV required; no speed threshold"
     echo "optrace_semantics=fresh process per graph; first selected graph execution; one payload"
+    echo "reference_result=${BASELINE_REFERENCE_RESULT}"
+    echo "reference_critical_path=${BASELINE_REFERENCE_CRITICAL_PATH}"
 } >"${RESULT_ROOT}/experiment_metadata.txt"
+if [[ -n "${RESUME_RESULT_ROOT}" ]]; then
+    printf 'resumed_at=%s\n' "$(date --iso-8601=seconds)" >>"${RESULT_ROOT}/experiment_metadata.txt"
+fi
 
 if [[ "${PREPARE_DEVICE}" == "1" ]]; then
     echo "===== Prepare device ====="
+    "${ADB[@]}" shell "mkdir -p '${REMOTE_DIR}'"
     "${ADB[@]}" push "${LOCAL_BUILD_BIN}"/*.so "${REMOTE_DIR}/" >/dev/null
+    "${ADB[@]}" push "${LOCAL_LIBOMP}" "${REMOTE_DIR}/libomp.so" >/dev/null
+    "${ADB[@]}" push \
+        "${QAIRT_ANDROID_LIB}/libQnnHtp.so" \
+        "${QAIRT_ANDROID_LIB}/libQnnSystem.so" \
+        "${QAIRT_ANDROID_LIB}/libQnnHtpV79Stub.so" \
+        "${QAIRT_ANDROID_LIB}/libQnnHtpProfilingReader.so" \
+        "${QAIRT_ANDROID_LIB}/libQnnHtpOptraceProfilingReader.so" \
+        "${QAIRT_ANDROID_LIB}/libQnnHtpPrepare.so" \
+        "${REMOTE_DIR}/" >/dev/null
+    "${ADB[@]}" push "${QAIRT_V79_LIB}/libQnnHtpV79Skel.so" \
+        "${REMOTE_DIR}/libQnnHtpV79Skel.so" >/dev/null
+    "${ADB[@]}" push "${LLAMA_PACKAGE_BUILD}/aarch64-android/libQnnLLaMAPackage.so" \
+        "${REMOTE_DIR}/libQnnLLaMAPackage_CPU.so" >/dev/null
+    "${ADB[@]}" push "${LLAMA_PACKAGE_BUILD}/hexagon-v79/libQnnLLaMAPackage.so" \
+        "${REMOTE_DIR}/libQnnLLaMAPackage_HTP.so" >/dev/null
     "${ADB[@]}" push "${LOCAL_RUNNER}" "${REMOTE_DIR}/${REMOTE_RUNNER}" >/dev/null
     # Windows ADB may not preserve the executable bit when pushing from a
     # mounted WSL path.  The runner is the only pushed artifact that must be
@@ -235,13 +302,18 @@ for ((round = 1; round <= BENCHMARK_RUNS; ++round)); do
     run_name="$(printf 'run_%02d' "${round}")"
     host_dir="${RESULT_ROOT}/benchmark/${run_name}"
     remote_run="${REMOTE_ROOT}/benchmark/${run_name}"
+    if [[ -s "${host_dir}/qnn_runner_e2e.csv" ]]; then
+        echo "Resume: keeping completed ${run_name}"
+        continue
+    fi
     mkdir -p "${host_dir}"
     "${ADB[@]}" shell "mkdir -p '${remote_run}'"
     "${ADB[@]}" shell dumpsys thermalservice >"${host_dir}/thermal_before.txt" || true
     set +e
     printf '%s\n' "${PROMPT}" | "${ADB[@]}" shell "
         cd '${REMOTE_DIR}' &&
-        export LD_LIBRARY_PATH=. &&
+        export LD_LIBRARY_PATH=.:${REMOTE_DIR} &&
+        export ADSP_LIBRARY_PATH='${REMOTE_DIR}' &&
         export MLLM_QNN_PROFILE_LEVEL=off &&
         export MLLM_QNN_PROFILE_DIR='${remote_run}' &&
         './${REMOTE_RUNNER}' \
@@ -268,10 +340,14 @@ done
 echo "===== Profiling-off lightweight accuracy sanity ====="
 remote_accuracy="${REMOTE_ROOT}/accuracy"
 "${ADB[@]}" shell "mkdir -p '${remote_accuracy}'"
+if [[ -s "${RESULT_ROOT}/qwen3-sm8750-v79-g32-accuracy.json" ]]; then
+    echo "Resume: keeping completed accuracy sanity"
+else
 set +e
 "${ADB[@]}" shell "
     cd '${REMOTE_DIR}' &&
-    export LD_LIBRARY_PATH=. &&
+    export LD_LIBRARY_PATH=.:${REMOTE_DIR} &&
+    export ADSP_LIBRARY_PATH='${REMOTE_DIR}' &&
     export MLLM_QNN_PROFILE_LEVEL=off &&
     export MLLM_QNN_PROFILE_DIR='${remote_accuracy}' &&
     './${REMOTE_RUNNER}' \
@@ -292,6 +368,7 @@ python3 "${REPO_ROOT}/scripts/qnn_accuracy_summary.py" \
     --max-new-tokens "${ACCURACY_MAX_NEW_TOKENS}" \
     --output "${RESULT_ROOT}/qwen3-sm8750-v79-g32-accuracy.json" \
     | tee "${RESULT_ROOT}/accuracy-summary.log"
+fi
 
 echo "===== Fresh-process Optrace captures ====="
 for graph in s32 s1; do
@@ -299,13 +376,20 @@ for graph in s32 s1; do
     remote_capture="${REMOTE_ROOT}/optrace_${graph}"
     graph_name="model.0.${graph}"
     schematic="${SCHEMATIC_DIR}/${graph_name}_schematic.bin"
+    chrome_trace="${host_prefix}-chrometrace.json"
+    htp_json="${host_prefix}-chrometrace_htp.json"
+    qhas_json="${host_prefix}-chrometrace_qnn_htp_analysis_summary.json"
+    if [[ -s "${chrome_trace}" && -s "${htp_json}" && -s "${qhas_json}" ]]; then
+        echo "Resume: keeping completed ${graph} Optrace decode"
+    else
     "${ADB[@]}" shell "mkdir -p '${remote_capture}'"
     "${ADB[@]}" shell dumpsys thermalservice >"${host_prefix}-thermal-before.txt" || true
 
     set +e
     printf '%s\n' "${PROMPT}" | "${ADB[@]}" shell "
         cd '${REMOTE_DIR}' &&
-        export LD_LIBRARY_PATH=. &&
+        export LD_LIBRARY_PATH=.:${REMOTE_DIR} &&
+        export ADSP_LIBRARY_PATH='${REMOTE_DIR}' &&
         export MLLM_QNN_PROFILE_LEVEL=optrace &&
         export MLLM_QNN_PROFILE_WARMUP=0 &&
         export MLLM_QNN_PROFILE_EVERY=1 &&
@@ -333,17 +417,15 @@ for graph in s32 s1; do
     done
     "${ADB[@]}" shell dumpsys thermalservice >"${host_prefix}-thermal-after.txt" || true
 
-    chrome_trace="${host_prefix}-chrometrace.json"
     "${PROFILE_VIEWER}" \
         --reader "${OPTRACE_READER}" \
         --input_log "${host_prefix}-optrace.log" \
         --schematic "${schematic}" \
         --output "${chrome_trace}" \
         2>&1 | tee "${host_prefix}-profile-viewer.log"
-    htp_json="${host_prefix}-chrometrace_htp.json"
-    qhas_json="${host_prefix}-chrometrace_qnn_htp_analysis_summary.json"
     [[ -s "${chrome_trace}" && -s "${htp_json}" && -s "${qhas_json}" ]] \
         || die "${graph}: viewer did not generate all required artifacts"
+    fi
 
     python3 "${REPO_ROOT}/scripts/qnn_optrace_summary.py" \
         "${chrome_trace}" \
@@ -357,16 +439,44 @@ for graph in s32 s1; do
         --qhas-json "${qhas_json}" \
         --output-prefix "${host_prefix}" \
         >"${host_prefix}-structure-generation.log"
+    python3 "${REPO_ROOT}/scripts/qnn_optrace_quantization.py" \
+        "${chrome_trace}" \
+        --qhas-json "${qhas_json}" \
+        --quant-manifest "${MANIFEST_DIR}/${graph_name}_quant_manifest.json" \
+        --output-prefix "${host_prefix}" \
+        >"${host_prefix}-quantization-generation.log"
 done
+
+python3 "${REPO_ROOT}/scripts/qnn_w4a8_acceptance.py" \
+    --s1-manifest "${MANIFEST_DIR}/model.0.s1_quant_manifest.json" \
+    --s1-trace "${RESULT_ROOT}/qwen3-sm8750-v79-g32-s1-chrometrace.json" \
+    --s1-qhas "${RESULT_ROOT}/qwen3-sm8750-v79-g32-s1-chrometrace_qnn_htp_analysis_summary.json" \
+    --s32-manifest "${MANIFEST_DIR}/model.0.s32_quant_manifest.json" \
+    --s32-trace "${RESULT_ROOT}/qwen3-sm8750-v79-g32-s32-chrometrace.json" \
+    --s32-qhas "${RESULT_ROOT}/qwen3-sm8750-v79-g32-s32-chrometrace_qnn_htp_analysis_summary.json" \
+    --output "${RESULT_ROOT}/qwen3-sm8750-v79-g32-w4a8-acceptance.json" \
+    | tee "${RESULT_ROOT}/w4a8-acceptance.log"
 
 echo "===== Throughput summary and canonical report ====="
 benchmark_csv=("${RESULT_ROOT}"/benchmark/run_*/qnn_runner_e2e.csv)
+[[ "${#benchmark_csv[@]}" == "${BENCHMARK_RUNS}" ]] \
+    || die "runner E2E CSV count mismatch: expected ${BENCHMARK_RUNS}, got ${#benchmark_csv[@]}"
+for csv_path in "${benchmark_csv[@]}"; do
+    [[ -s "${csv_path}" ]] || die "formal comparison forbids QHAS fallback; missing runner CSV: ${csv_path}"
+done
 python3 "${REPO_ROOT}/scripts/qnn_profile_speed_summary.py" \
+    --forbid-fallback \
     "${benchmark_csv[@]}" \
     --s1-qhas "${RESULT_ROOT}/qwen3-sm8750-v79-g32-s1-chrometrace_qnn_htp_analysis_summary.json" \
     --s32-qhas "${RESULT_ROOT}/qwen3-sm8750-v79-g32-s32-chrometrace_qnn_htp_analysis_summary.json" \
     --output "${RESULT_ROOT}/qwen3-sm8750-v79-g32-speed.json" \
     | tee "${RESULT_ROOT}/speed-summary.log"
+python3 "${REPO_ROOT}/scripts/qnn_speed_comparison.py" \
+    --candidate "${RESULT_ROOT}/qwen3-sm8750-v79-g32-speed.json" \
+    --reference "${RESULTS_BASE}/${BASELINE_REFERENCE_RESULT}/qwen3-sm8750-v79-g32-speed.json" \
+    --reference-id "${BASELINE_REFERENCE_RESULT}" \
+    --output "${RESULT_ROOT}/qwen3-sm8750-v79-g32-speed-comparison.json" \
+    | tee "${RESULT_ROOT}/speed-comparison.log"
 
 # The shared report generator expects the historical qwen3-sm8750-v79-
 # {s1,s32} basename. Keep the G32 artifacts authoritative, while adding
@@ -386,6 +496,7 @@ python3 "${REPO_ROOT}/scripts/qnn_e2e_critical_path_report.py" \
     --results-dir "${RESULT_ROOT}" \
     --speed-json "${RESULT_ROOT}/qwen3-sm8750-v79-g32-speed.json" \
     --accuracy-json "${RESULT_ROOT}/qwen3-sm8750-v79-g32-accuracy.json" \
+    --speed-comparison-json "${RESULT_ROOT}/qwen3-sm8750-v79-g32-speed-comparison.json" \
     --output "${FINAL_REPORT}" \
     | tee "${RESULT_ROOT}/report-generation.log"
 [[ -s "${FINAL_REPORT}" ]] || die "final HTML report was not generated"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Host-only preflight for the archived W4A16G32 baseline.  It deliberately
+# Host-only preflight for the experimental W4A8G32 baseline.  It deliberately
 # does not require adb or QAIRT, so it can be run immediately after moving the
 # repository/models tree to another VM before attempting a device run.
 #
@@ -22,7 +22,7 @@ CONTRACT_FILE="${CONTRACT_FILE:-${REPO_ROOT}/profiles/qwen3_sm8750_v79_g32/basel
 # shellcheck disable=SC1090
 source "${CONTRACT_FILE}"
 
-ARTIFACT_ROOT="${ARTIFACT_ROOT:-$(cd "${REPO_ROOT}/.." && pwd)}"
+ARTIFACT_ROOT="${ARTIFACT_ROOT:-/mnt/d/llm_exp}"
 MODEL_ROOT="${MODEL_ROOT:-${ARTIFACT_ROOT}/models}"
 LOCAL_RUNNER="${LOCAL_RUNNER:-${REPO_ROOT}/${BASELINE_RUNNER_REL}}"
 LOCAL_MODEL="${LOCAL_MODEL:-${MODEL_ROOT}/${BASELINE_MODEL_REL}}"
@@ -30,6 +30,7 @@ LOCAL_TOKENIZER="${LOCAL_TOKENIZER:-${MODEL_ROOT}/${BASELINE_TOKENIZER_REL}}"
 LOCAL_CONFIG="${LOCAL_CONFIG:-${REPO_ROOT}/${BASELINE_CONFIG_REL}}"
 ACCURACY_SUITE="${ACCURACY_SUITE:-${REPO_ROOT}/${BASELINE_ACCURACY_SUITE_REL}}"
 SCHEMATIC_DIR="${SCHEMATIC_DIR:-${MODEL_ROOT}/${BASELINE_SCHEMATIC_REL}}"
+MANIFEST_DIR="${MANIFEST_DIR:-${MODEL_ROOT}/${BASELINE_MANIFEST_REL}}"
 
 die() {
     echo "ERROR: $*" >&2
@@ -59,6 +60,10 @@ check_sha schematic_s1 "${SCHEMATIC_DIR}/model.0.s1_schematic.bin" \
     "${BASELINE_S1_SCHEMATIC_SHA256}"
 check_sha schematic_s32 "${SCHEMATIC_DIR}/model.0.s32_schematic.bin" \
     "${BASELINE_S32_SCHEMATIC_SHA256}"
+check_sha manifest_s1 "${MANIFEST_DIR}/model.0.s1_quant_manifest.json" \
+    "${BASELINE_S1_MANIFEST_SHA256}"
+check_sha manifest_s32 "${MANIFEST_DIR}/model.0.s32_quant_manifest.json" \
+    "${BASELINE_S32_MANIFEST_SHA256}"
 
 echo
 echo "Baseline contract: ${BASELINE_ID}"

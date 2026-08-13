@@ -50,6 +50,7 @@ size_t lanesOfType(DataTypes dtype) {
     CASE(kInt16PerTensorSym)
     CASE(kInt8PerTensorSym)
     CASE(kUInt8PerTensorSym)
+    CASE(kUInt8PerTensorAsy)
     CASE(kUInt16PerTensorAsy)
     CASE(kUInt16PerTensorSym)
     case kByte: return MllmDataTypeInfo<kUInt8>::lanes();
@@ -105,6 +106,7 @@ size_t bytesOfType(DataTypes dtype) {
     CASE(kUInt16PerTensorAsy)
     CASE(kInt8PerTensorSym)
     CASE(kUInt8PerTensorSym)
+    CASE(kUInt8PerTensorAsy)
     CASE(kInt4)
     CASE(kUInt4)
     case kByte: return MllmDataTypeInfo<kUInt8>::bytes();
@@ -159,6 +161,7 @@ std::string nameOfType(DataTypes dtype) {
     CASE(kUInt16PerTensorAsy)
     CASE(kInt8PerTensorSym)
     CASE(kUInt8PerTensorSym)
+    CASE(kUInt8PerTensorAsy)
     CASE(kInt4)
     CASE(kUInt4)
     case kByte: return MllmDataTypeInfo<kUInt8>::name();

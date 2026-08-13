@@ -23,7 +23,7 @@ def qhas_graph_execute_us(path):
     return float(document["data"]["htp_overall_summary"]["data"][0]["graph_execute_us"])
 
 
-def summarize(paths, s1_qhas=None, s32_qhas=None):
+def summarize(paths, s1_qhas=None, s32_qhas=None, forbid_fallback=False):
     samples = {phase: [] for phase in PHASES}
     for path in paths:
         for row in read_runner_csv(path):
@@ -61,6 +61,10 @@ def summarize(paths, s1_qhas=None, s32_qhas=None):
     missing = sorted(set(PHASES) - set(result["phases"]))
     if not missing:
         return result
+    if forbid_fallback:
+        raise ValueError(
+            f"missing runner E2E samples for {missing}; QHAS fallback is forbidden for this baseline"
+        )
     if not s1_qhas or not s32_qhas:
         raise ValueError(f"missing runner E2E samples for {missing}; QHAS fallback paths were not provided")
 
@@ -98,8 +102,14 @@ def main():
     parser.add_argument("--s1-qhas", type=Path)
     parser.add_argument("--s32-qhas", type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--forbid-fallback", action="store_true")
     args = parser.parse_args()
-    result = summarize(args.runner_csv, args.s1_qhas, args.s32_qhas)
+    result = summarize(
+        args.runner_csv,
+        args.s1_qhas,
+        args.s32_qhas,
+        forbid_fallback=args.forbid_fallback,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False) + "\n"

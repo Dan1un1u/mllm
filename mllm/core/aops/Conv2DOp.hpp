@@ -14,6 +14,7 @@ enum class Conv2DOpImplType {
   // LPBQ
   kQNN_LPBQ_w4a16o16_G16,
   kQNN_LPBQ_w4a16o16_G32,
+  kQNN_LPBQ_w4a8o8_G32,
   kQNN_LPBQ_w4a16o16_G64,
 };
 
@@ -33,6 +34,7 @@ inline Conv2DOpImplType str2Conv2DOpImplType(const std::string& str) {
       {"Default", Conv2DOpImplType::kDefault},
       {"QNN_LPBQ_w4a16o16_G16", Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G16},
       {"QNN_LPBQ_w4a16o16_G32", Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G32},
+      {"QNN_LPBQ_w4a8o8_G32", Conv2DOpImplType::kQNN_LPBQ_w4a8o8_G32},
       {"QNN_LPBQ_w4a16o16_G64", Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G64}};
 
   auto it = map.find(str);
@@ -47,6 +49,7 @@ inline std::string Conv2DOpImplType2Str(Conv2DOpImplType type) {
       {Conv2DOpImplType::kDefault, "Default"},
       {Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G16, "QNN_LPBQ_w4a16o16_G16"},
       {Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G32, "QNN_LPBQ_w4a16o16_G32"},
+      {Conv2DOpImplType::kQNN_LPBQ_w4a8o8_G32, "QNN_LPBQ_w4a8o8_G32"},
       {Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G64, "QNN_LPBQ_w4a16o16_G64"}};
 
   auto it = map.find(type);

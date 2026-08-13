@@ -53,7 +53,11 @@ Tensor QDQ(nn::Module* m, Tensor in, const std::string& qdq_name_in_pytorch) {
     zp_name = m->getModuleName() + "." + qdq_name_in_pytorch + ".fake_quant.zero_point";
   }
 
+#ifdef MLLM_QWEN3_QNN_AOT_G32
+  if (in.dtype() == kUInt16PerTensorAsy) { (void)in.__unsafeSetDType(kUInt8PerTensorAsy); }
+#endif
   switch (in.dtype()) {
+    case kUInt8PerTensorAsy:
     case kUInt16PerTensorAsy: {
       auto scale = m->getTopParameterFile()->pull(scale_name);
       auto zp = m->getTopParameterFile()->pull(zp_name);
@@ -108,9 +112,14 @@ Tensor QDQ_ROPE(nn::Module* m, Tensor in, const std::string& qdq_name_in_pytorch
   auto scale_name = m->getModuleName() + "." + qdq_name_in_pytorch + ".fake_quant.scale";
   auto zp_name = m->getModuleName() + "." + qdq_name_in_pytorch + ".fake_quant.zero_point";
 
+#ifdef MLLM_QWEN3_QNN_AOT_G32
+  (void)in.__unsafeSetDType(kUInt8PerTensorAsy);
+#else
   (void)in.__unsafeSetDType(kUInt16PerTensorAsy);
+#endif
 
   switch (in.dtype()) {
+    case kUInt8PerTensorAsy:
     case kUInt16PerTensorAsy: {
       auto scale = m->getTopParameterFile()->pull(scale_name);
       auto zp = m->getTopParameterFile()->pull(zp_name);
@@ -138,7 +147,7 @@ Tensor rotateHalf(Tensor x, nn::Module* m, const std::string& qdq_name_in_pytorc
 
 using vi32 = std::vector<int32_t>;
 #ifdef MLLM_QWEN3_QNN_AOT_G32
-#define QWEN3_QNN_AOT_LPBQ_IMPL aops::Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G32
+#define QWEN3_QNN_AOT_LPBQ_IMPL aops::Conv2DOpImplType::kQNN_LPBQ_w4a8o8_G32
 #else
 #define QWEN3_QNN_AOT_LPBQ_IMPL aops::Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G16
 #endif
@@ -509,7 +518,10 @@ class Qwen3TextSHA final : public nn::Module {
     auto& blocks = decode_blocks_.list();
 
     // X is already embedded
-    auto x = embedding_(inputs[0]);
+    // QNN Gather requires its UInt16 table and output carriers to match.  The
+    // explicit HTP Convert makes the gathered values A8 activations without
+    // changing the preserved UInt16 embedding storage.
+    auto x = ptq::QDQ(this, embedding_(inputs[0]).to(kUInt8PerTensorAsy), "embed_tokens_output_qdq");
 
     const auto& position_ids = inputs[1];
     auto causal_mask = inputs[2];

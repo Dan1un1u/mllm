@@ -131,7 +131,15 @@ def classification(qnn_name, qnn_type, num_q_heads, num_kv_heads):
         ("self_attn.Softmax.", "scale_mask_softmax"),
     ):
         if rest.startswith(prefix):
-            head = int(rest.removeprefix(prefix))
+            # Lowering may keep graph-visible boundary converts underneath a
+            # head operator (for example ``q_norm.0.a16_to_a8``).  The head
+            # identity is the leading decimal component; the remaining
+            # suffix describes a physical child node, not another head.
+            head_suffix = rest.removeprefix(prefix)
+            head_match = re.match(r"(\d+)(?:\.|$)", head_suffix)
+            if not head_match:
+                continue
+            head = int(head_match.group(1))
             return stage, layer, head, stage
 
     if rest.startswith("self_attn.MatMul."):

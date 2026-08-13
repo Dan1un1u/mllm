@@ -86,6 +86,10 @@ ir::linalg::LinalgIRQuantizatonSpecAttr::ptr_t genSimpleQuantizationSpecAttr(con
       spec = ir::linalg::QuantizationSpecSymPerTensor::create(0, 255, kUInt8, kFloat32, Tensor::nil());
       break;
     }
+    case kUInt8PerTensorAsy: {
+      spec = ir::linalg::QuantizationSpecAsymPerTensor::create(0, 255, kUInt8, kFloat32, kInt32, Tensor::nil(), Tensor::nil());
+      break;
+    }
     case kInt16PerTensorSym: {
       spec = ir::linalg::QuantizationSpecSymPerTensor::create(-32768, 32767, kInt16, kFloat32, Tensor::nil());
       break;
@@ -316,19 +320,22 @@ bool LLMQuantRecipeConv2DPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr
 
       ir::linalg::QuantizationSpecLPBQ::ptr_t weight_quant_spec = nullptr;
 
-      if (precision == "w4a16") {
+      if (precision == "w4a16" || precision == "w4a8") {
         // HWIO
         weight_quant_spec =
             ir::linalg::QuantizationSpecLPBQ::create(-7, 7, block_size, 3, 4, kInt4, kFloat32, Tensor::nil(), Tensor::nil());
 
-        // output sym int16
-        auto out_quant_spec = ir::linalg::QuantizationSpecAsymPerTensor::create(0, 65536 - 1, kUInt16, kFloat32, kInt32,
-                                                                                Tensor::nil(), Tensor::nil());
+        const auto activation_type = precision == "w4a8" ? kUInt8 : kUInt16;
+        const auto activation_max = precision == "w4a8" ? 255 : 65535;
+        auto out_quant_spec = ir::linalg::QuantizationSpecAsymPerTensor::create(
+            0, activation_max, activation_type, kFloat32, kInt32, Tensor::nil(), Tensor::nil());
         conv2d_ir->outputs().front()->setAttr("quant_recipe",
                                               writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(out_quant_spec));
 
         annotation_attr->annotation_.outputs.emplace_back(out_quant_spec);
         annotation_attr->annotation_.weights.insert({"weight", weight_quant_spec});
+      } else {
+        MLLM_ERROR_EXIT(ExitCode::kCoreError, "Unsupported LPBQ precision '{}' for Conv2D op '{}'", precision, op_name);
       }
 
       auto weight_name = conv2d_ir->getAOp()->getName() + ".weight";
@@ -759,13 +766,18 @@ bool LLMQuantRecipeEqualPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_
     if (i_1->getAttr("constant")) {
       auto i_1_tensor = i_1->cast_<ir::tensor::TensorValue>()->tensor_;
       switch (i_1_tensor.dtype()) {
+        case kUInt8:
         case kUInt16:
         case kInt16:
         case kFloat32: {
-          // Force all i_1 to be uint16 per tensor asy
-          i_1->setAttr("quant_recipe",
-                       writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(ir::linalg::QuantizationSpecAsymPerTensor::create(
-                           0, 65535, kUInt16, kFloat32, kInt32, Tensor::nil(), Tensor::nil())));
+          // ElementWiseEqual requires both operands to use the same physical
+          // datatype. Reuse the activation encoding instead of forcing A16.
+          auto input_spec = i_0->getAttr("quant_recipe")->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>();
+          auto source_spec = std::static_pointer_cast<ir::linalg::QuantizationSpecAsymPerTensor>(input_spec->spec_);
+          auto constant_tensor = i_1->cast_<ir::tensor::TensorValue>();
+          const auto target_dtype = source_spec->quant_to_type == kUInt8 ? kUInt8PerTensorAsy : kUInt16PerTensorAsy;
+          constant_tensor->tensor_ = constant_tensor->tensor_.__unsafeSetDType(target_dtype);
+          i_1->setAttr("quant_recipe", input_spec);
           break;
         }
         default: {
@@ -908,18 +920,21 @@ bool LLMQuantRecipeLinearPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr
 
       ir::linalg::QuantizationSpecLPBQ::ptr_t weight_quant_spec = nullptr;
 
-      if (precision == "w4a16") {
+      if (precision == "w4a16" || precision == "w4a8") {
         weight_quant_spec =
             ir::linalg::QuantizationSpecLPBQ::create(-8, 7, block_size, 0, 4, kUInt4, kFloat32, Tensor::nil(), Tensor::nil());
 
-        // output sym int16
-        auto out_quant_spec = ir::linalg::QuantizationSpecAsymPerTensor::create(0, 65536 - 1, kUInt16, kFloat32, kInt32,
-                                                                                Tensor::nil(), Tensor::nil());
+        const auto activation_type = precision == "w4a8" ? kUInt8 : kUInt16;
+        const auto activation_max = precision == "w4a8" ? 255 : 65535;
+        auto out_quant_spec = ir::linalg::QuantizationSpecAsymPerTensor::create(
+            0, activation_max, activation_type, kFloat32, kInt32, Tensor::nil(), Tensor::nil());
         linear_ir->outputs().front()->setAttr("quant_recipe",
                                               writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(out_quant_spec));
 
         annotation_attr->annotation_.outputs.emplace_back(out_quant_spec);
         annotation_attr->annotation_.weights.insert({"weight", weight_quant_spec});
+      } else {
+        MLLM_ERROR_EXIT(ExitCode::kCoreError, "Unsupported LPBQ precision '{}' for Linear op '{}'", precision, op_name);
       }
 
       auto weight_name = linear_ir->getAOp()->getName() + ".weight";
@@ -1030,7 +1045,8 @@ bool LLMQuantRecipeEmbeddingPattern::rewrite(ir::IRWriter& writer, const ir::op_
   weight_reg_tensor_ir->outputs().front()->setAttr("quant_recipe", weight_spec_attr);
   annotation_attr->annotation_.weights.insert({"weight", weight_spec_attr->spec_});
 
-  // o_0's quant recipe shares with weight
+  // QNN Gather requires the table and output carriers to match.  W4A8 inserts
+  // an explicit Convert immediately after this output.
   o_0->setAttr("quant_recipe", weight_spec_attr);
   annotation_attr->annotation_.outputs.emplace_back(weight_spec_attr->spec_);
 

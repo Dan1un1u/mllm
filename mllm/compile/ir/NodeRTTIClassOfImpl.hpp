@@ -375,6 +375,9 @@ struct NodeRTTIClassOfImpl {
 #define RTTI_RK_ATTR_BUILTINIRATTR_VECTORUINT16ATTR_IMPL(v) \
   return (v)->getKind() >= RK_Attr_BuiltinIRAttr_VectorUInt16Attr && (v)->getKind() <= RK_Attr_BuiltinIRAttr_VectorUInt16Attr
 
+#define RTTI_RK_ATTR_BUILTINIRATTR_VECTORUINT8ATTR_IMPL(v) \
+  return (v)->getKind() >= RK_Attr_BuiltinIRAttr_VectorUInt8Attr && (v)->getKind() <= RK_Attr_BuiltinIRAttr_VectorUInt8Attr
+
 #define RTTI_RK_ATTR_CONTROLFLOWIRATTR_IMPL(v) \
   return (v)->getKind() >= RK_Attr_ControlFlowIRAttr && (v)->getKind() <= RK_Attr_ControlFlowIRAttr
 
