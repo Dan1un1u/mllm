@@ -105,7 +105,22 @@ result is an input to this implementation. The source-to-context build from
 contain 1009 W4G32 LPBQ targets and 729 native-U8 RmsNorm operations per graph,
 with zero recipe-induced RMSNorm bridges.
 
-The compiled manifest/schematic evidence is not a substitute for runtime
-evidence. A target Android device must still run the existing profiling wrapper
-to produce comparable E2E data, sanity output, and s1/s32 Optrace; until then
-the experiment is build-valid but not yet a completed True W4A8 execution.
+Runtime evidence is now complete in
+`D:\\llm_exp\\results\\qwen3_sm8750_v79_w4a8_rmsnorm_u8_20260813_220228`.
+The Windows adb executable (`C:\\adb\\adb.exe`) addressed the connected
+`PJZ110` device explicitly by serial; the separate old WSL adb server had no
+device. Three profiling-off runner rounds, the 100-case informational sanity
+suite, and fresh-process s1/s32 Optrace all completed. The measured medians
+were 788.252 prefill tokens/s and 37.942 decode tokens/s after first token.
+Against the requested W4A16 reference
+`qwen3_sm8750_v79_g32_20260807_230410`, these are -8.34% and -16.59%; this
+experiment has no speed or accuracy gate.
+
+The joint runtime audit passes for both graphs: 1009/1009 target operations
+were observed, 729/729 RmsNorm operations were traced, all target RmsNorm
+operations were physical U8 with zero U16 RmsNorm operations and zero explicit
+RmsNorm bridges. The canonical report is
+`qwen3-sm8750-v79-g32-e2e-critical-path.html` in the result directory. Large
+QAIRT viewer inputs/outputs are decoded in the native WSL workspace and then
+copied back to the D-drive result namespace; raw Optrace and compact evidence
+remain archived under `D:\\llm_exp`.
