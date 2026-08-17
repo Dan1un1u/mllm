@@ -96,6 +96,106 @@ _Avoid_: D-drive build tree, archived runtime build
 A completed model, context binary, or compact evidence bundle copied from the native WSL build workspace into its immutable experiment namespace under `D:\llm_exp`, with source and destination digests verified. Partial or failed working state is not a published artifact.
 _Avoid_: Build cache, staging directory, unverified copy
 
+**MLP LPBQ operator-expression experiment**:
+An isolated derivative of the native U8 RMSNorm experiment that changes only the QNN operation expression of the model's MLP gate, up, and down projections while preserving their deployed W4G32 values, activation encodings, and surrounding computation. Attention projections, the language-model head, normalization, and other operators remain outside its target set.
+_Avoid_: Full-model Linear migration, MLP requantization, general LPBQ redesign
+
+**MLP operator-expression candidate**:
+A FullyConnected or MatMul representation of the same quantized MLP projection currently represented by Conv2D. Candidate identity describes the backend expression, not a different weight or activation quantization scheme.
+_Avoid_: New quantization recipe, alternative MLP model
+
+**Uniform MLP lowering**:
+One operator-expression candidate used consistently for gate, up, and down projections in both single-token and multi-token graphs. A mixture chosen separately by shape or graph is outside the initial experiment.
+_Avoid_: Per-shape winner, mixed FC/MatMul MLP
+
+**MLP advancement gate**:
+The paired operator-level and complete-single-layer checkpoint that a uniform MLP lowering must pass before full-model construction. It requires compatible tensor shapes, equivalent deployed mathematics, target-backend execution, and independently measured non-regression for every target projection shape and graph length.
+_Avoid_: Compile-only gate, aggregate-speed gate, full-model-first trial
+
+**Measured MLP non-regression**:
+A candidate result no more than one percent slower than the paired Conv2D reference under the same profiling conditions. Each target shape and graph length is judged independently; improvements in one case cannot hide regression in another.
+_Avoid_: Average non-regression, unpaired speed estimate, theoretical speedup
+
+**Accepted MLP iteration**:
+A full-model MLP LPBQ operator-expression result that retains the advancement-gate contracts and also avoids more than one percent regression in both end-to-end prefill and decode performance against the native U8 RMSNorm reference. A locally faster candidate that fails this full-model check remains a failed experiment.
+_Avoid_: Micrograph-only success, partially accepted migration
+
+**Adapter-free MLP boundary**:
+The unchanged logical MLP projection interface whose shape and quantization encoding match the Conv2D reference. Metadata-only views may express an operator's rank convention, but physical copies, transposes, format changes, or datatype conversions are not part of this boundary.
+_Avoid_: Layout-adapted projection, conversion-tolerant boundary
+
+**Deployed-equivalent MLP projection**:
+An operator-expression candidate whose operation-specific weight layout decodes exactly to the reference projection's signed W4G32 matrix and whose activation encodings are identical to the reference. Backend rounding may differ within the agreed output tolerance, but weight values, scales, zero-points, and logical tensor shapes may not.
+_Avoid_: Requantized projection, approximately matched weights
+
+**Reference-relative MLP correctness**:
+Numerical correctness measured against a high-precision computation using the exact deployed weights and activation encodings, with the Conv2D expression serving as the accepted error baseline. A candidate may differ in backend rounding but may not worsen maximum, tail, or aggregate error by more than one output quantization step.
+_Avoid_: Bit-identical operator output, accuracy-benchmark gate
+
+**Paired MLP timing**:
+Profiling-off device timing in which each Conv2D reference and operator-expression candidate uses the same inputs, thermal controls, warmup, repetition count, and fresh-process protocol. Runtime Optrace is separate execution evidence and diagnostic evidence rather than the sole speed measurement.
+_Avoid_: Optrace-only timing, unpaired benchmark
+
+**MLP candidate winner**:
+The gate-passing uniform MLP lowering with the best worst-case normalized latency across the target projection shapes and graph lengths. When candidates are indistinguishable within the measurement band, FullyConnected is preferred for its direct projection semantics.
+_Avoid_: Average-case winner, per-shape winner
+
+**Representative middle-layer MLP**:
+A preselected Qwen3 layer-14 MLP used for the complete-single-layer advancement check so that neither model entry nor model exit behavior determines the result. Its identity is fixed before candidate timing begins.
+_Avoid_: First-layer gate, last-layer gate, best-performing layer
+
+**Warm MLP timing**:
+Paired steady-state timing collected after the target projection or MLP has executed enough times to remove initialization and warmup effects. It characterizes the resident kernel path but does not represent first access to previously untouched weights.
+_Avoid_: Streaming-weight timing, first-execution timing
+
+**Cold-weight MLP timing**:
+Paired first-execution timing collected in fresh processes after the device is primed by an unrelated graph but before the target weights have been used. It is the experiment's proxy for the layer-to-layer weight streaming seen in the full model.
+_Avoid_: Device-startup timing, warmed-weight timing
+
+**Single-layer MLP integration check**:
+The complete-single-layer advancement check comprising both an independently timed layer-14 MLP and an otherwise unchanged full graph in which only layer 14 uses the candidate expression. The full graph establishes real-neighbor compatibility; its end-to-end delta is informational because one changed layer is below the experiment's whole-model resolution.
+_Avoid_: Standalone-operator-only gate, one-layer full-model speed gate
+
+**Operator-aware LPBQ layout**:
+An explicit mapping from each QNN projection expression to its weight channel and block axes. Conv2D, FullyConnected, and MatMul retain distinct physical layouts while decoding to the same logical W4G32 projection.
+_Avoid_: Rank-relative axis guessing, shared physical weight layout
+
+**Candidate-local advancement**:
+Independent staged evaluation of each MLP operator-expression candidate from host correctness through hardware timing and single-layer integration. Failure removes only that candidate; full-model work stops when no uniform candidate remains or the selected candidate fails the complete-single-layer gate.
+_Avoid_: First-candidate-wins, shared candidate gate, benchmark-before-correctness
+
+**Layout-derived MLP artifact**:
+An experiment model derived from the immutable native U8 RMSNorm artifact solely by changing the physical carrier layout of target MLP weights. Its canonical decoded weights and all activation encodings remain identical to its source artifact.
+_Avoid_: Recalibrated MLP artifact, requantized candidate model
+
+**Pinned middle-layer activation fixture**:
+A digest-identified set of single-token and multi-token UInt8 activations generated for layer 14 from the experiment's fixed input data and stored outside source control. It provides real-value inputs for paired correctness and speed measurements.
+_Avoid_: Random-only performance input, untracked activation dump
+
+**Full-model MLP structural audit**:
+The joint manifest and runtime check that every MLP projection uses the selected operator expression while all non-MLP projection, native U8 RMSNorm, W4G32, and activation contracts remain unchanged and no new conversion or fallback is present.
+_Avoid_: Operator-count spot check, configuration-only audit
+
+**Compact failed-gate evidence**:
+The small, reproducible summaries, metadata, and decisive logs retained when a candidate or experiment fails a hard gate. Large contexts, raw traces, temporary models, and build caches are not retained for a failed experiment.
+_Avoid_: No failure record, archived failed build tree
+
+**Six-case MLP gate matrix**:
+The independent cold-weight and warm timing cases formed by gate, up, and down projections in both single-token and multi-token graphs. Gate and up remain separate cases despite sharing a shape because their weights and activation encodings differ.
+_Avoid_: Shape-only gate matrix, combined gate/up result
+
+**Same-session full-model gate**:
+The interleaved paired comparison between the native U8 RMSNorm reference and the full MLP candidate used to resolve the one-percent end-to-end threshold. Its paired result governs acceptance while the standard three-round summary preserves comparability with archived profiles.
+_Avoid_: Archived-result-only gate, unpaired full-model timing
+
+**Invalid MLP timing set**:
+A timing set rejected because of abnormal thermal state, excessive process-to-process dispersion, or inconsistent paired direction. It may be recollected once after cooldown; repeated instability is a stop condition rather than permission to sample until a pass appears.
+_Avoid_: Slow outlier deletion, retry-until-pass timing
+
+**MLP gate report**:
+The compact comparison record that joins six-case cold and warm latency with physical weight-expansion, memory-traffic, DMA-wait, HMX, kernel-selection, and pass-state evidence. It accompanies rather than replaces the canonical end-to-end critical-path report.
+_Avoid_: Latency-only summary, critical-path-only report
+
 ## Clean-room implementation status
 
 The native-U8 RMSNorm experiment is implemented as a clean-room derivative of
