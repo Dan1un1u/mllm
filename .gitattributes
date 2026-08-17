@@ -12,3 +12,6 @@
 *.yaml   text eol=lf
 *.yml    text eol=lf
 *.md     text eol=lf
+
+# Preserve the vendored upstream blob; it is committed with CRLF line endings.
+third_party/half/include/half/half.hpp -text
