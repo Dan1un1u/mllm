@@ -192,6 +192,14 @@ _Avoid_: Archived-result-only gate, unpaired full-model timing
 A timing set rejected because of abnormal thermal state, excessive process-to-process dispersion, or inconsistent paired direction. It may be recollected once after cooldown; repeated instability is a stop condition rather than permission to sample until a pass appears.
 _Avoid_: Slow outlier deletion, retry-until-pass timing
 
+**Front-end-only LPBQ MatMul lowering**:
+An LPBQ graph whose pre-finalize QNN expression is MatMul but whose finalized V79 schematic uses the same ConvLayer, W4-to-Int8 expansion, weight-to-VTCM, and HMX physical families as the Conv2D reference. The front-end operator name alone is not evidence of a distinct or faster hardware kernel.
+_Avoid_: Native MatMul LPBQ kernel, MatMul speedup
+
+**Disqualified LPBQ MLP candidate**:
+An operator-expression candidate removed from advancement after any independent real-shape gate fails. A favorable result in another shape may not be aggregated with it, and no mixed winner or full-model migration is inferred without a separately accepted experiment.
+_Avoid_: Aggregate MLP pass, partial-shape winner
+
 **MLP gate report**:
 The compact comparison record that joins six-case cold and warm latency with physical weight-expansion, memory-traffic, DMA-wait, HMX, kernel-selection, and pass-state evidence. It accompanies rather than replaces the canonical end-to-end critical-path report.
 _Avoid_: Latency-only summary, critical-path-only report

@@ -5,6 +5,7 @@
 
 #include "mllm/utils/Common.hpp"
 #include "mllm/core/DataTypes.hpp"
+#include "mllm/core/aops/MatMulOp.hpp"
 #include "mllm/compile/ir/Node.hpp"
 #include "mllm/compile/ir/graph/Op.hpp"
 #include "mllm/compile/ir/linalg/Op.hpp"
@@ -742,20 +743,51 @@ bool LLMQuantRecipeMatMulPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr
   auto o_0 = *(node->outputs().begin());
 
   MLLM_RETURN_FALSE_IF_NOT(i_0->getAttr("quant_recipe"));
-  MLLM_RETURN_FALSE_IF_NOT(i_1->getAttr("quant_recipe"));
 
+  const auto matmul_aop = dynamic_cast<mllm::aops::MatMulOp*>(matmul_ir->getAOp());
+  MLLM_RETURN_FALSE_IF_NOT(matmul_aop);
+  const bool is_lpbq_projection =
+      matmul_aop->options().matmul_type == mllm::aops::MatMulOpType::kQNN_LPBQ_w4a8o8_G32;
+
+  if (is_lpbq_projection) {
+    MLLM_RETURN_FALSE_IF_NOT(!matmul_aop->options().transpose_a);
+    MLLM_RETURN_FALSE_IF_NOT(!matmul_aop->options().transpose_b);
+    MLLM_RETURN_FALSE_IF_NOT(i_1->isa_<ir::tensor::TensorValue>());
+
+    auto weight_tensor = i_1->cast_<ir::tensor::TensorValue>();
+    MLLM_RETURN_FALSE_IF_NOT(weight_tensor->tensor_.rank() == 2);
+    auto weight_spec = ir::linalg::QuantizationSpecLPBQ::create(
+        -7, 7, 32, 1, 4, kInt4, kFloat32, Tensor::nil(), Tensor::nil());
+    auto weight_attr = writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(weight_spec);
+    weight_tensor->setAttr("quant_recipe", weight_attr);
+
+    auto out_quant_spec = ir::linalg::QuantizationSpecAsymPerTensor::create(
+        0, 255, kUInt8, kFloat32, kInt32, Tensor::nil(), Tensor::nil());
+    auto out_attr = writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(out_quant_spec);
+    o_0->setAttr("quant_recipe", out_attr);
+
+    auto annotation_attr = writer.create<ir::linalg::LinalgIRQuantizatonAnnotationAttr>();
+    annotation_attr->annotation_.inputs.emplace_back(
+        i_0->getAttr("quant_recipe")->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_);
+    annotation_attr->annotation_.inputs.emplace_back(weight_spec);
+    annotation_attr->annotation_.outputs.emplace_back(out_quant_spec);
+    annotation_attr->annotation_.weights.insert({"weight", weight_spec});
+    node->setAttr("quant_recipe", annotation_attr);
+    return true;
+  }
+
+  MLLM_RETURN_FALSE_IF_NOT(i_1->getAttr("quant_recipe"));
   auto o_spec = genSimpleQuantizationSpecAttr(writer.getContext(), o_0->cast_<ir::tensor::TensorValue>());
   o_0->setAttr("quant_recipe", o_spec);
 
   auto annotation_attr = writer.create<ir::linalg::LinalgIRQuantizatonAnnotationAttr>();
-  node->setAttr("quant_recipe", annotation_attr);
-
   annotation_attr->annotation_.inputs.emplace_back(
       i_0->getAttr("quant_recipe")->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_);
   annotation_attr->annotation_.inputs.emplace_back(
       i_1->getAttr("quant_recipe")->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_);
   annotation_attr->annotation_.outputs.emplace_back(
       o_0->getAttr("quant_recipe")->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_);
+  node->setAttr("quant_recipe", annotation_attr);
 
   return true;
 }
@@ -937,7 +969,7 @@ bool LLMQuantRecipeLinearPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr
 
       if (precision == "w4a16" || precision == "w4a8") {
         weight_quant_spec =
-            ir::linalg::QuantizationSpecLPBQ::create(-8, 7, block_size, 0, 4, kUInt4, kFloat32, Tensor::nil(), Tensor::nil());
+            ir::linalg::QuantizationSpecLPBQ::create(-7, 7, block_size, 0, 4, kInt4, kFloat32, Tensor::nil(), Tensor::nil());
 
         const auto activation_type = precision == "w4a8" ? kUInt8 : kUInt16;
         const auto activation_max = precision == "w4a8" ? 255 : 65535;

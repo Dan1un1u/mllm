@@ -15,6 +15,7 @@
 #include "mllm/core/DataTypes.hpp"
 #include "mllm/core/OpTypes.hpp"
 #include "mllm/core/ParameterFile.hpp"
+#include "mllm/core/aops/MatMulOp.hpp"
 #include "mllm/utils/Common.hpp"
 
 namespace mllm::qnn::aot {
@@ -30,6 +31,28 @@ void checkTypeLimits(Tensor in, int quant_min, int quant_max) {  // NOLINT
   }
 }
 
+void solveLPBQWeight(const ParameterFile::ptr_t& pf, const ir::linalg::QuantizationSpec::ptr_t& weight_spec,
+                     const std::string& parameter_prefix) {
+  if (weight_spec->solved) return;
+  MLLM_RT_ASSERT_EQ(weight_spec->type, ir::linalg::QuantizationSpecType::kLPBQ);
+
+  auto this_spec = std::static_pointer_cast<ir::linalg::QuantizationSpecLPBQ>(weight_spec);
+  auto scale1 = pf->pull(parameter_prefix + ".scale1");  // using uint8 to store uint4
+  auto scale2 = pf->pull(parameter_prefix + ".scale2");
+  auto weight = pf->pull(parameter_prefix + ".weight");
+
+  checkTypeLimits<int8_t>(weight, 0, 15);   // signed Int4 stored as its low nibble
+  checkTypeLimits<uint8_t>(scale1, 0, 16);  // UInt4 block scale
+  MLLM_RT_ASSERT_EQ(this_spec->quant_min, -7);
+  MLLM_RT_ASSERT_EQ(this_spec->quant_max, 7);
+  MLLM_RT_ASSERT_EQ(this_spec->quant_to_type, kInt4);
+  MLLM_RT_ASSERT_EQ(this_spec->scale_level_0_bitwidth, 4);
+
+  this_spec->scale_level_0_int = scale1;
+  this_spec->scale_level_1_fp = scale2;
+  weight_spec->solved = true;
+}
+
 void solveLinearWeight(const ir::IRContext::ptr_t& ctx, const ParameterFile::ptr_t& pf,
                        const ir::linalg::LinalgIROp::ptr_t& op) {
   auto mllm_op = op->getAOp();
@@ -41,25 +64,28 @@ void solveLinearWeight(const ir::IRContext::ptr_t& ctx, const ParameterFile::ptr
 
   switch (weight_spec->type) {
     case ir::linalg::QuantizationSpecType::kLPBQ: {
-      auto this_spec = std::static_pointer_cast<ir::linalg::QuantizationSpecLPBQ>(weight_spec);
-      auto scale1 = pf->pull(mllm_op->getName() + ".scale1");  // using uint8 to store uint4
-      auto scale2 = pf->pull(mllm_op->getName() + ".scale2");
-      auto weight = pf->pull(mllm_op->getName() + ".weight");
-
-      // FIXME weight maybe error, Check qnn eats int8 or uint8. Here weight using int8 to store int4.
-      checkTypeLimits<int8_t>(weight, 0, 15);   // Int4
-      checkTypeLimits<uint8_t>(scale1, 0, 16);  // UInt4
-
-      this_spec->scale_level_0_int = scale1;
-      this_spec->scale_level_1_fp = scale2;
-
-      weight_spec->solved = true;
+      solveLPBQWeight(pf, weight_spec, mllm_op->getName());
       break;
     }
     default: {
       NYI("quant recipe type not support");
     }
   }
+}
+
+void solveMatMulWeight(const ParameterFile::ptr_t& pf, const ir::linalg::MatMulOp::ptr_t& op) {
+  auto matmul_aop = dynamic_cast<mllm::aops::MatMulOp*>(op->getAOp());
+  MLLM_RT_ASSERT(matmul_aop);
+  if (matmul_aop->options().matmul_type != mllm::aops::MatMulOpType::kQNN_LPBQ_w4a8o8_G32) return;
+
+  auto annotation = op->getAttr("quant_recipe")->cast_<ir::linalg::LinalgIRQuantizatonAnnotationAttr>();
+  auto weight_spec = annotation->annotation_.weights.at("weight");
+  auto weight_tensor = (*std::next(op->inputs().begin()))->cast_<ir::tensor::TensorValue>();
+  auto weight_name = weight_tensor->tensor_.name();
+  MLLM_RT_ASSERT(weight_name.ends_with(".weight"));
+  weight_name.resize(weight_name.size() - std::string(".weight").size());
+  MLLM_INFO("PTQPass working on MatMul parameter: {}", weight_name);
+  solveLPBQWeight(pf, weight_spec, weight_name);
 }
 
 void solveRMSNormWeight(const ir::IRContext::ptr_t& ctx, const ParameterFile::ptr_t& pf,
@@ -151,6 +177,7 @@ void recursiveSolveWeights(const std::shared_ptr<ir::IRContext>& ir_ctx, const i
       // Conv2D's Check same with Linear
       solveLinearWeight(w.getContext(), pf, op->cast_<ir::linalg::LinalgIROp>());
     }
+    if (op->isa_<ir::linalg::MatMulOp>()) { solveMatMulWeight(pf, op->cast_<ir::linalg::MatMulOp>()); }
     if (op->isa_<ir::linalg::RMSNormOp>()) { solveRMSNormWeight(w.getContext(), pf, op->cast_<ir::linalg::LinalgIROp>()); }
     if (op->isa_<ir::linalg::EmbeddingOp>()) { solveEmbeddingWeight(w.getContext(), pf, op->cast_<ir::linalg::LinalgIROp>()); }
     if (op->isa_<ir::graph::CallGraphOp>()) {

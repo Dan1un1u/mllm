@@ -21,8 +21,19 @@ if(MLLM_QUALCOMM_QNN_AOT_ON_X86_ENABLE)
   target_compile_definitions(mllm-qwen3-aot-sha-g32-c PRIVATE MLLM_QWEN3_QNN_AOT_G32=1)
   target_link_libraries(mllm-qwen3-aot-sha-g32-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
   target_include_directories(mllm-qwen3-aot-sha-g32-c PRIVATE ${MLLM_INCLUDE_DIR})
+
+  add_executable(mllm-qwen3-lpbq-mlp-micrograph-c compile_lpbq_mlp_micrograph.cpp)
+  target_link_libraries(mllm-qwen3-lpbq-mlp-micrograph-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+  target_include_directories(mllm-qwen3-lpbq-mlp-micrograph-c PRIVATE ${MLLM_INCLUDE_DIR})
 endif()
 
 add_executable(mllm-qwen3-aot-runner aot_run.cpp)
 target_link_libraries(mllm-qwen3-aot-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
 target_include_directories(mllm-qwen3-aot-runner PRIVATE ${MLLM_INCLUDE_DIR})
+
+# Profiling-off runner for the isolated layer-14 LPBQ projection contexts.  It
+# deliberately calls QNNBackend::graphExecute directly so no host framework op
+# or QNN profiling handle is included in the paired micrograph measurement.
+add_executable(mllm-qnn-lpbq-mlp-runner run_lpbq_mlp_micrograph.cpp)
+target_link_libraries(mllm-qnn-lpbq-mlp-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+target_include_directories(mllm-qnn-lpbq-mlp-runner PRIVATE ${MLLM_INCLUDE_DIR})

@@ -1,6 +1,7 @@
 # W4A8G32 LPBQ MLP Operator-Expression Experiment
 
-Status: accepted design, implementation pending.
+Status: stopped at the operator warm-performance gate on 2026-08-18. See
+[`w4a8g32_lpbq_mlp_gate_result.md`](w4a8g32_lpbq_mlp_gate_result.md).
 
 This experiment starts from commit `987a7156` on the accepted native-U8
 RMSNorm baseline. It asks whether expressing Qwen3 MLP projections as QNN

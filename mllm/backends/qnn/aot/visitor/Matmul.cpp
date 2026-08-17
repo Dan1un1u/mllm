@@ -35,14 +35,24 @@ bool QnnAOTMatMulPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& op) 
   // Output
   auto output = op->outputs().front()->cast_<ir::tensor::TensorValue>();
 
+  const auto input1_quant_recipe = input1->getAttr("quant_recipe");
+  const auto input1_quant_attr =
+      input1_quant_recipe ? input1_quant_recipe->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>() : nullptr;
+  const bool input1_is_lpbq =
+      input1_quant_attr && input1_quant_attr->spec_->type == ir::linalg::QuantizationSpecType::kLPBQ;
+
   // Create QNN MatMul Op
   auto qnn_op_node = QnnAOTNodeOperation::create("MatMul");
   qnn_op_node->setPackageName("qti.aisw");
 
   qnn_op_node->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, input0))
-      ->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, input1))
+      ->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, input1, input1_is_lpbq,
+                                                  input1_is_lpbq ? QnnLpbqWeightLayout::kMatMulIO
+                                                                 : QnnLpbqWeightLayout::kUnspecified))
       ->emplaceOutput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, output))
       ->setName(matmul_op->getAOp()->getName());
+
+  qnn_op_node->emplaceParamScalar(QNNParamScalarWrapper::create(QNN_OP_MAT_MUL_PARAM_TRANSPOSE_IN1, false));
 
   // Register this op node into one graph.
   env->captureAOTNodeOp(qnn_context_name, qnn_graph_name, qnn_op_node);

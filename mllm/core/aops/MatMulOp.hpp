@@ -17,6 +17,9 @@ enum class MatMulOpType {
 
   // MLLM Self Host
   kMllmBlas,
+
+  // QNN AOT
+  kQNN_LPBQ_w4a8o8_G32,
 };
 
 struct MatMulOpOptions : public BaseOpOptions<MatMulOpOptions> {
@@ -29,7 +32,9 @@ inline MatMulOpType str2MatMulOpType(const std::string& str) {
   static const std::unordered_map<std::string, MatMulOpType> map = {{"Default", MatMulOpType::kDefault},
                                                                     {"GGUF", MatMulOpType::kGGUF},
                                                                     {"BLAS", MatMulOpType::kBLAS},
-                                                                    {"MllmBlas", MatMulOpType::kMllmBlas}};
+                                                                    {"MllmBlas", MatMulOpType::kMllmBlas},
+                                                                    {"QNN_LPBQ_w4a8o8_G32",
+                                                                     MatMulOpType::kQNN_LPBQ_w4a8o8_G32}};
 
   auto it = map.find(str);
   if (it != map.end()) return it->second;
@@ -40,7 +45,9 @@ inline std::string MatMulOpType2Str(MatMulOpType type) {
   static const std::unordered_map<MatMulOpType, std::string> map = {{MatMulOpType::kDefault, "Default"},
                                                                     {MatMulOpType::kGGUF, "GGUF"},
                                                                     {MatMulOpType::kBLAS, "BLAS"},
-                                                                    {MatMulOpType::kMllmBlas, "MllmBlas"}};
+                                                                    {MatMulOpType::kMllmBlas, "MllmBlas"},
+                                                                    {MatMulOpType::kQNN_LPBQ_w4a8o8_G32,
+                                                                     "QNN_LPBQ_w4a8o8_G32"}};
 
   auto it = map.find(type);
   if (it != map.end()) return it->second;

@@ -52,7 +52,8 @@ bool QnnAOTLinearPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& op) 
   qnn_op_node->setPackageName("qti.aisw");
 
   qnn_op_node->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, input))
-      ->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, weight_val, true));
+      ->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, weight_val, true,
+                                                  QnnLpbqWeightLayout::kFullyConnectedOI));
 
   // Handle Bias
   if (real_linear_op->options().bias) {

@@ -251,7 +251,49 @@ nlohmann::json nativeQuantizationJson(const Qnn_Tensor_t* tensor) {
 
 }  // namespace
 
-QnnAOTNodeTensor::QnnAOTNodeTensor(const ir::tensor::TensorValue::ptr_t& v, bool force_static_weight) {
+QnnLpbqLayoutInfo resolveQnnLpbqLayout(const Tensor::shape_t& shape, QnnLpbqWeightLayout layout, int32_t block_size) {
+  MLLM_RT_ASSERT(block_size > 0);
+
+  int32_t channel_axis = -1;
+  int32_t reduction_axis = -1;
+  switch (layout) {
+    case QnnLpbqWeightLayout::kConv2dHWIO: {
+      MLLM_RT_ASSERT_EQ(shape.size(), 4u);
+      MLLM_RT_ASSERT_EQ(shape[0], 1);
+      MLLM_RT_ASSERT_EQ(shape[1], 1);
+      reduction_axis = 2;
+      channel_axis = 3;
+      break;
+    }
+    case QnnLpbqWeightLayout::kFullyConnectedOI: {
+      MLLM_RT_ASSERT_EQ(shape.size(), 2u);
+      channel_axis = 0;
+      reduction_axis = 1;
+      break;
+    }
+    case QnnLpbqWeightLayout::kMatMulIO: {
+      MLLM_RT_ASSERT_EQ(shape.size(), 2u);
+      reduction_axis = 0;
+      channel_axis = 1;
+      break;
+    }
+    case QnnLpbqWeightLayout::kUnspecified:
+    default: {
+      MLLM_ERROR_EXIT(ExitCode::kCoreError, "LPBQ weight layout must be specified explicitly");
+    }
+  }
+
+  const auto reduction_size = shape[reduction_axis];
+  MLLM_RT_ASSERT_EQ(reduction_size % block_size, 0);
+  return QnnLpbqLayoutInfo{
+      .channel_axis = static_cast<uint32_t>(channel_axis),
+      .channel_count = static_cast<uint32_t>(shape[channel_axis]),
+      .blocks_per_channel = static_cast<uint32_t>(reduction_size / block_size),
+  };
+}
+
+QnnAOTNodeTensor::QnnAOTNodeTensor(const ir::tensor::TensorValue::ptr_t& v, bool force_static_weight,
+                                   QnnLpbqWeightLayout lpbq_layout) {
   ir_storage_dtype_ = nameOfType(v->tensor_.dtype());
   quant_recipe_json_ = quantRecipeJson(v).dump();
   auto type = parseQnnTensorTypeFromIR(v);
@@ -263,7 +305,7 @@ QnnAOTNodeTensor::QnnAOTNodeTensor(const ir::tensor::TensorValue::ptr_t& v, bool
   } else {
     tensor_wrapper_ = mllm::qnn::QNNTensorWrapper::create(name, type, v->tensor_, quant);
   }
-  setupComplexTensorQuantization(v);  // per-channel and LPBQ cases
+  setupComplexTensorQuantization(v, lpbq_layout);  // per-channel and LPBQ cases
 }
 
 Qnn_TensorType_t QnnAOTNodeTensor::parseQnnTensorTypeFromIR(const ir::tensor::TensorValue::ptr_t& v) {
@@ -383,7 +425,8 @@ Qnn_QuantizeParams_t QnnAOTNodeTensor::parseQnnQuantizeParamFromIR(const ir::ten
   return ret;
 }
 
-void QnnAOTNodeTensor::setupComplexTensorQuantization(const ir::tensor::TensorValue::ptr_t& v) {
+void QnnAOTNodeTensor::setupComplexTensorQuantization(const ir::tensor::TensorValue::ptr_t& v,
+                                                      QnnLpbqWeightLayout lpbq_layout) {
   MLLM_RT_ASSERT(v->getAttr("quant_recipe"));
   auto quant_spec = v->getAttr("quant_recipe")->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_;
 
@@ -406,14 +449,19 @@ void QnnAOTNodeTensor::setupComplexTensorQuantization(const ir::tensor::TensorVa
     }
     case ir::linalg::QuantizationSpecType::kLPBQ: {
       MLLM_INFO("Solving LPBQ quantization for tensor: {}", v->tensor_.name());
-      // This LPBQ Type is for Conv2D Only !!! Linear has diff layout cmp with conv2d
-
       auto cfg = std::static_pointer_cast<ir::linalg::QuantizationSpecLPBQ>(quant_spec);
+      const auto layout_info = resolveQnnLpbqLayout(v->tensor_.shape(), lpbq_layout, cfg->block_size);
 
       // Prepare data
-      auto num_scale_offsets = (uint32_t)v->tensor_.size(-1);
+      auto num_scale_offsets = layout_info.channel_count;
       std::vector<Qnn_ScaleOffset_t> scale_offsets(num_scale_offsets);
-      MLLM_RT_ASSERT_EQ(num_scale_offsets, cfg->scale_level_1_fp.size(-1));
+      MLLM_RT_ASSERT_EQ(static_cast<uint32_t>(cfg->ch_axis), layout_info.channel_axis);
+      MLLM_RT_ASSERT_EQ(num_scale_offsets, cfg->scale_level_1_fp.numel());
+      MLLM_RT_ASSERT_EQ(cfg->scale_level_0_int.numel(), num_scale_offsets * layout_info.blocks_per_channel);
+      MLLM_RT_ASSERT_EQ(cfg->quant_min, -7);
+      MLLM_RT_ASSERT_EQ(cfg->quant_max, 7);
+      MLLM_RT_ASSERT_EQ(cfg->quant_to_type, kInt4);
+      MLLM_RT_ASSERT_EQ(cfg->scale_level_0_bitwidth, 4);
       MLLM_RT_ASSERT_EQ(cfg->scale_level_0_int.dtype(), kUInt8);
       MLLM_RT_ASSERT_EQ(cfg->scale_level_1_fp.dtype(), kFloat32);
       MLLM_RT_ASSERT_EQ(cfg->scale_level_0_int.rank(), 1);
@@ -424,9 +472,9 @@ void QnnAOTNodeTensor::setupComplexTensorQuantization(const ir::tensor::TensorVa
       }
 
       Qnn_BlockwiseExpansion_t blockwise_expansion;
-      blockwise_expansion.axis = v->tensor_.rank() - 1;
+      blockwise_expansion.axis = layout_info.channel_axis;
       blockwise_expansion.scaleOffsets = nullptr;  // Will be set by setBlockwiseQuantization
-      blockwise_expansion.numBlocksPerAxis = v->tensor_.size(-2) / cfg->block_size;
+      blockwise_expansion.numBlocksPerAxis = layout_info.blocks_per_channel;
       blockwise_expansion.blockScaleBitwidth = 4;  // 4 bits for uint4 scale
       blockwise_expansion.blockScaleStorageType = QNN_BLOCKWISE_EXPANSION_BITWIDTH_SCALE_STORAGE_8;
       blockwise_expansion.blocksScale8 = cfg->scale_level_0_int.ptr<mllm_uint8_t>();
@@ -1098,7 +1146,8 @@ void QnnAOTEnv::captureAOTNodeOp(const std::string& qnn_context_name, const std:
 }
 
 QnnAOTNodeTensor::ptr_t QnnAOTEnv::captureQnnAOTNodeTensor(const std::string& qnn_context_name, const std::string& graph_name,
-                                                           const ir::tensor::TensorValue::ptr_t& v, bool force_static_weight) {
+                                                           const ir::tensor::TensorValue::ptr_t& v, bool force_static_weight,
+                                                           QnnLpbqWeightLayout lpbq_layout) {
   auto __qnn_tensor_name = v->name();
 
   bool __qnn_enable_static_weight = force_static_weight;
@@ -1127,7 +1176,7 @@ QnnAOTNodeTensor::ptr_t QnnAOTEnv::captureQnnAOTNodeTensor(const std::string& qn
 
   // There has no Tensor in the cache.
   if (ret == nullptr) {
-    ret = QnnAOTNodeTensor::create(v, __qnn_enable_static_weight);
+    ret = QnnAOTNodeTensor::create(v, __qnn_enable_static_weight, lpbq_layout);
 
     if (__qnn_enable_static_weight) { contexts_[qnn_context_name]->static_tensor_[__qnn_tensor_name] = ret; }
   }

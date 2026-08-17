@@ -28,6 +28,21 @@
 
 namespace mllm::qnn::aot {
 
+enum class QnnLpbqWeightLayout {
+  kUnspecified = 0,
+  kConv2dHWIO,
+  kFullyConnectedOI,
+  kMatMulIO,
+};
+
+struct QnnLpbqLayoutInfo {
+  uint32_t channel_axis;
+  uint32_t channel_count;
+  uint32_t blocks_per_channel;
+};
+
+QnnLpbqLayoutInfo resolveQnnLpbqLayout(const Tensor::shape_t& shape, QnnLpbqWeightLayout layout, int32_t block_size);
+
 void __mllmLoggerCallback4QnnLogger(const char* fmt, QnnLog_Level_t level, uint64_t times_tamp, va_list argp);
 
 // Collection of symbols that we need to load from qnn dyn lib.
@@ -44,11 +59,13 @@ class QnnAOTNodeTensor : public std::enable_shared_from_this<QnnAOTNodeTensor> {
  public:
   using ptr_t = std::shared_ptr<QnnAOTNodeTensor>;
 
-  static inline ptr_t create(const ir::tensor::TensorValue::ptr_t& v, bool force_static_weight = false) {
-    return std::make_shared<QnnAOTNodeTensor>(v, force_static_weight);
+  static inline ptr_t create(const ir::tensor::TensorValue::ptr_t& v, bool force_static_weight = false,
+                             QnnLpbqWeightLayout lpbq_layout = QnnLpbqWeightLayout::kUnspecified) {
+    return std::make_shared<QnnAOTNodeTensor>(v, force_static_weight, lpbq_layout);
   }
 
-  explicit QnnAOTNodeTensor(const ir::tensor::TensorValue::ptr_t& v, bool force_static_weight = false);
+  explicit QnnAOTNodeTensor(const ir::tensor::TensorValue::ptr_t& v, bool force_static_weight = false,
+                            QnnLpbqWeightLayout lpbq_layout = QnnLpbqWeightLayout::kUnspecified);
 
   std::shared_ptr<mllm::qnn::QNNTensorWrapper> getWrapper() { return tensor_wrapper_; }
   [[nodiscard]] const std::string& getIRStorageDtype() const { return ir_storage_dtype_; }
@@ -64,7 +81,7 @@ class QnnAOTNodeTensor : public std::enable_shared_from_this<QnnAOTNodeTensor> {
   Qnn_QuantizeParams_t parseQnnQuantizeParamFromIR(const ir::tensor::TensorValue::ptr_t& v);
 
   // intend for per-channel and LPBQ quantization
-  void setupComplexTensorQuantization(const ir::tensor::TensorValue::ptr_t& v);
+  void setupComplexTensorQuantization(const ir::tensor::TensorValue::ptr_t& v, QnnLpbqWeightLayout lpbq_layout);
 
   std::shared_ptr<mllm::qnn::QNNTensorWrapper> tensor_wrapper_;
   std::string ir_storage_dtype_;
@@ -238,7 +255,8 @@ class QnnAOTEnv {
                         const QnnAOTNodeOperation::ptr_t& op);
 
   QnnAOTNodeTensor::ptr_t captureQnnAOTNodeTensor(const std::string& qnn_context_name, const std::string& graph_name,
-                                                  const ir::tensor::TensorValue::ptr_t& v, bool force_static_weight = false);
+                                                  const ir::tensor::TensorValue::ptr_t& v, bool force_static_weight = false,
+                                                  QnnLpbqWeightLayout lpbq_layout = QnnLpbqWeightLayout::kUnspecified);
 
   inline QnnFuncSymbols& getFuncSymbol() { return qnn_htp_func_symbols_; }
 
