@@ -16,7 +16,7 @@ remote="${REMOTE_DIR:-/data/local/tmp/mllm_w4a8_lpbq_mlp}"
 mode="${1:-correctness}"
 
 case "${remote}" in
-  /data/local/tmp/mllm_w4a8_lpbq_mlp) ;;
+  /data/local/tmp/mllm_w4a8_lpbq_mlp|/data/local/tmp/mllm_w4a8_lpbq_mlp_qairt249) ;;
   *) echo "refusing unexpected REMOTE_DIR: ${remote}" >&2; exit 2 ;;
 esac
 

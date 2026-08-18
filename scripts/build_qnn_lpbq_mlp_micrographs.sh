@@ -9,6 +9,7 @@ source_model="${LPBQ_MLP_CONV_MODEL:-${models_root}/qwen3_sm8750_v79/g32/w4a8_rm
 fc_model="${LPBQ_MLP_FC_MODEL:-${artifact_root}/qwen3-1.7B-w4a8g32-rmsnorm-u8-layer14-fc.mllm}"
 matmul_model="${LPBQ_MLP_MATMUL_MODEL:-${artifact_root}/qwen3-1.7B-w4a8g32-rmsnorm-u8-layer14-matmul.mllm}"
 compiler="${LPBQ_MLP_COMPILER:-${repo_root}/build-qnn-aot/bin/mllm-qwen3-lpbq-mlp-micrograph-c}"
+compiler_bin="$(dirname "${compiler}")"
 aot_config="${LPBQ_MLP_AOT_CONFIG:-${repo_root}/examples/qwen3_qnn_aot/qnn_aot_cfg_1.7B_g32.json}"
 qnn_lib="${qairt_root}/lib/x86_64-linux-clang"
 
@@ -17,9 +18,15 @@ read -r -a projections <<< "${LPBQ_MLP_PROJECTIONS:-gate_proj up_proj down_proj}
 read -r -a sequences <<< "${LPBQ_MLP_SEQUENCES:-1 32}"
 
 [[ -x "${compiler}" ]] || { echo "compiler missing: ${compiler}" >&2; exit 2; }
+for library in libMllmRT.so libMllmCPUBackend.so libMllmQNNBackend.so; do
+  [[ -f "${compiler_bin}/${library}" ]] || {
+    echo "compiler-local runtime missing: ${compiler_bin}/${library}" >&2
+    exit 2
+  }
+done
 [[ -f "${qnn_lib}/libQnnHtp.so" ]] || { echo "QAIRT HTP library missing: ${qnn_lib}" >&2; exit 2; }
 
-export LD_LIBRARY_PATH="${repo_root}/build-qnn-aot/bin:${qnn_lib}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export LD_LIBRARY_PATH="${compiler_bin}:${qnn_lib}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 export MLLM_QNN_AOT_OPTRACE=1
 
 for layout in "${layouts[@]}"; do
