@@ -80,7 +80,8 @@ void Conv2DOp::reshape(const std::vector<Tensor>& inputs, std::vector<Tensor>& o
   if (options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G32
       || options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a8o8_G32
       || options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G64
-      || options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G16) {
+      || options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G16
+      || options_.impl_type == Conv2DOpImplType::kQNN_W8A8) {
     in_channels = ishape[3];
     in_height = ishape[1];
     in_width = ishape[2];
@@ -116,7 +117,8 @@ void Conv2DOp::reshape(const std::vector<Tensor>& inputs, std::vector<Tensor>& o
   if (options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G32
       || options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a8o8_G32
       || options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G64
-      || options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G16) {
+      || options_.impl_type == Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G16
+      || options_.impl_type == Conv2DOpImplType::kQNN_W8A8) {
     new_shape = std::vector<int32_t>{batch, h_out, w_out, out_channels};
   }
 

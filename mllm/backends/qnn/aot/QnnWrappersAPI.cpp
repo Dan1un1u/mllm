@@ -369,9 +369,14 @@ Qnn_QuantizeParams_t QnnAOTNodeTensor::parseQnnQuantizeParamFromIR(const ir::ten
         MLLM_ERROR_EXIT(ExitCode::kCoreError, "SymPerTensor quant recipe has no scale. tensor: {}", v->name());
       }
 
-      MLLM_RT_ASSERT_EQ(cfg->quant_to_type, kUInt8);
-
-      ret.scaleOffsetEncoding = Qnn_ScaleOffset_t{.scale = cfg->scale.item<float>(), .offset = -128};
+      int32_t offset = 0;
+      if (cfg->quant_to_type == kUInt8) {
+        offset = -128;
+      } else if (cfg->quant_to_type != kInt8) {
+        MLLM_ERROR_EXIT(ExitCode::kCoreError, "Unsupported symmetric per-tensor QNN storage: {}",
+                        nameOfType(cfg->quant_to_type));
+      }
+      ret.scaleOffsetEncoding = Qnn_ScaleOffset_t{.scale = cfg->scale.item<float>(), .offset = offset};
       MLLM_INFO("Configuring SymPerTensor quantization for tensor: {}, scale: {}", v->name(), cfg->scale.item<float>());
       break;
     }

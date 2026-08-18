@@ -56,6 +56,27 @@ void solveLinearWeight(const ir::IRContext::ptr_t& ctx, const ParameterFile::ptr
       weight_spec->solved = true;
       break;
     }
+    case ir::linalg::QuantizationSpecType::kSymPerTensor: {
+      auto this_spec = std::static_pointer_cast<ir::linalg::QuantizationSpecSymPerTensor>(weight_spec);
+      auto scale = pf->pull(mllm_op->getName() + ".scale");
+      auto weight = pf->pull(mllm_op->getName() + ".weight");
+      if (this_spec->quant_to_type == kInt8) {
+        MLLM_RT_ASSERT_EQ(weight.dtype(), kInt8PerTensorSym);
+        checkTypeLimits<int8_t>(weight, this_spec->quant_min, this_spec->quant_max);
+      } else if (this_spec->quant_to_type == kUInt8) {
+        MLLM_RT_ASSERT_EQ(weight.dtype(), kUInt8PerTensorSym);
+        checkTypeLimits<uint8_t>(weight, this_spec->quant_min, this_spec->quant_max);
+      } else {
+        MLLM_ERROR_EXIT(ExitCode::kCoreError, "Unsupported symmetric per-tensor Linear weight storage: {}",
+                        nameOfType(this_spec->quant_to_type));
+      }
+      MLLM_RT_ASSERT(scale.dtype() == kFloat32);
+      MLLM_RT_ASSERT(scale.numel() == 1);
+      MLLM_RT_ASSERT(scale.item<float>() > 0);
+      this_spec->scale = scale;
+      weight_spec->solved = true;
+      break;
+    }
     default: {
       NYI("quant recipe type not support");
     }

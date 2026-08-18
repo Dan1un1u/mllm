@@ -16,6 +16,11 @@ enum class Conv2DOpImplType {
   kQNN_LPBQ_w4a16o16_G32,
   kQNN_LPBQ_w4a8o8_G32,
   kQNN_LPBQ_w4a16o16_G64,
+
+  // Per-tensor symmetric W8 weight with A8 activation.  This keeps the
+  // QNN NHWC/HWIO Conv2D carrier used by LPBQ so diagnostic comparisons do
+  // not accidentally change layout together with weight encoding.
+  kQNN_W8A8,
 };
 
 struct Conv2DOpOptions : public BaseOpOptions<Conv2DOpOptions> {
@@ -35,7 +40,8 @@ inline Conv2DOpImplType str2Conv2DOpImplType(const std::string& str) {
       {"QNN_LPBQ_w4a16o16_G16", Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G16},
       {"QNN_LPBQ_w4a16o16_G32", Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G32},
       {"QNN_LPBQ_w4a8o8_G32", Conv2DOpImplType::kQNN_LPBQ_w4a8o8_G32},
-      {"QNN_LPBQ_w4a16o16_G64", Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G64}};
+      {"QNN_LPBQ_w4a16o16_G64", Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G64},
+      {"QNN_W8A8", Conv2DOpImplType::kQNN_W8A8}};
 
   auto it = map.find(str);
   if (it != map.end()) { return it->second; }
@@ -50,7 +56,8 @@ inline std::string Conv2DOpImplType2Str(Conv2DOpImplType type) {
       {Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G16, "QNN_LPBQ_w4a16o16_G16"},
       {Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G32, "QNN_LPBQ_w4a16o16_G32"},
       {Conv2DOpImplType::kQNN_LPBQ_w4a8o8_G32, "QNN_LPBQ_w4a8o8_G32"},
-      {Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G64, "QNN_LPBQ_w4a16o16_G64"}};
+      {Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G64, "QNN_LPBQ_w4a16o16_G64"},
+      {Conv2DOpImplType::kQNN_W8A8, "QNN_W8A8"}};
 
   auto it = map.find(type);
   if (it != map.end()) return it->second;

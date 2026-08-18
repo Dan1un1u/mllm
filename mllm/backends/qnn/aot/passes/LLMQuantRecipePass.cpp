@@ -345,6 +345,34 @@ bool LLMQuantRecipeConv2DPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr
       MLLM_RETURN_FALSE_IF_NOT(weight_reg_tensor_ir->outputs().front()->isa_<ir::tensor::TensorValue>());
       auto t = weight_reg_tensor_ir->outputs().front()->cast_<ir::tensor::TensorValue>();
       t->setAttr("quant_recipe", writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(weight_quant_spec));
+    } else if (use_config["method"] == "per-tensor") {
+      const std::string precision = use_config["precision"];
+      const bool sym = use_config["sym"];
+      if (!sym || precision != "w8a8") {
+        MLLM_ERROR_EXIT(ExitCode::kCoreError,
+                        "Conv2D per-tensor recipe requires symmetric w8a8; got sym={}, precision='{}' for op '{}'",
+                        sym, precision, op_name);
+      }
+
+      // Use QNN's native signed fixed-point W8 representation.  Activation
+      // and output remain asymmetric UInt8 exactly as in the accepted W4A8
+      // baseline; only the static-weight encoding changes.
+      auto weight_quant_spec = ir::linalg::QuantizationSpecSymPerTensor::create(
+          -128, 127, kInt8, kFloat32, Tensor::nil());
+      auto out_quant_spec = ir::linalg::QuantizationSpecAsymPerTensor::create(
+          0, 255, kUInt8, kFloat32, kInt32, Tensor::nil(), Tensor::nil());
+      conv2d_ir->outputs().front()->setAttr(
+          "quant_recipe", writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(out_quant_spec));
+      annotation_attr->annotation_.outputs.emplace_back(out_quant_spec);
+      annotation_attr->annotation_.weights.insert({"weight", weight_quant_spec});
+
+      auto weight_name = conv2d_ir->getAOp()->getName() + ".weight";
+      auto weight_reg_tensor_ir = writer.getContext()->lookupSymbolTable(weight_name);
+      MLLM_RETURN_FALSE_IF_NOT(weight_reg_tensor_ir);
+      MLLM_RETURN_FALSE_IF_NOT(weight_reg_tensor_ir->isa_<ir::tensor::RegisterOp>());
+      MLLM_RETURN_FALSE_IF_NOT(weight_reg_tensor_ir->outputs().front()->isa_<ir::tensor::TensorValue>());
+      auto t = weight_reg_tensor_ir->outputs().front()->cast_<ir::tensor::TensorValue>();
+      t->setAttr("quant_recipe", writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(weight_quant_spec));
     } else {
       std::string s = use_config["method"];
       MLLM_WARN("Currently not support method: {}", s);
