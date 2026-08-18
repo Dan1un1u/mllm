@@ -96,6 +96,10 @@ _Avoid_: D-drive build tree, archived runtime build
 A completed model, context binary, or compact evidence bundle copied from the native WSL build workspace into its immutable experiment namespace under `D:\llm_exp`, with source and destination digests verified. Partial or failed working state is not a published artifact.
 _Avoid_: Build cache, staging directory, unverified copy
 
+**LPBQ output-channel split experiment**:
+An isolated native-U8 RMSNorm derivative that replaces one S=1 layer-14 gate or up LPBQ projection of shape `2048x6144` with two mathematically identical `2048x3072` projections followed by channel concatenation. It preserves W4G32 codes, block/channel scales, asymmetric-U8 input/output encodings, target hardware, and QAIRT version. Its gate requires byte-exact output and no more than 1% profiling-off slowdown for both gate and up projections before any full-model work.
+_Avoid_: Smaller-weight model, reduced LPBQ workload, full-model optimization
+
 ## Clean-room implementation status
 
 The native-U8 RMSNorm experiment is implemented as a clean-room derivative of
@@ -124,3 +128,15 @@ RmsNorm bridges. The canonical report is
 QAIRT viewer inputs/outputs are decoded in the native WSL workspace and then
 copied back to the D-drive result namespace; raw Optrace and compact evidence
 remain archived under `D:\\llm_exp`.
+
+The layer-14 S=1 LPBQ output-channel split experiment is complete and failed
+its performance gate. Its two 2048x3072 projections reproduce the accepted
+2048x6144 gate/up projections byte-for-byte, but `gate_proj` changed from 203
+to 207 microseconds (+1.97%) in the five-round profiling-off summary. Optrace
+shows identical physical work counts for full and split forms: 192 weight DMA
+transfers, 96 weight waits, 576 W4 expansions, 96 HMX tiles, and 140 target
+checkpoint/sync instances. QAIRT already tiles the full projection into the
+same 64-output-channel HMX work, so graph-level splitting changes scheduling
+without reducing the physical working set. The experiment stops before any
+full-model integration; its report is
+`docs/profiling/lpbq_gateup_s1_oc_split_micrograph.md`.
