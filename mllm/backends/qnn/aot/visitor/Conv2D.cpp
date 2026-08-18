@@ -1,10 +1,15 @@
 // Copyright (c) MLLM Team.
 // Licensed under the MIT License.
 
+#include <memory>
+
 #include "mllm/backends/qnn/QNNUtils.hpp"
+#include "mllm/core/DataTypes.hpp"
+#include "mllm/core/Tensor.hpp"
 #include "mllm/utils/Common.hpp"
 #include "mllm/compile/ir/linalg/Op.hpp"
 #include "mllm/compile/ir/builtin/Attribute.hpp"
+#include "mllm/compile/ir/linalg/Attribute.hpp"
 #include "mllm/backends/qnn/aot/QnnWrappersAPI.hpp"
 #include "mllm/backends/qnn/aot/visitor/Conv2D.hpp"
 #include "mllm/backends/qnn/aot/passes/AOTCompileContext.hpp"
@@ -62,6 +67,32 @@ bool QnnAOTConv2DPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& op) 
                         .front()
                         ->cast_<ir::tensor::TensorValue>();
     qnn_op_node->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, bias_val, true));
+  } else if (real_linear_op->options().qnn_explicit_zero_bias) {
+    // QNN HTP accepts a U8 bias for quantized Conv2d. Supplying an explicit
+    // zero tensor lets this isolated experiment test whether finalize can
+    // avoid the anomalously expensive internally synthesized bias path. Zero
+    // is exact because the carrier and quantization zero point are both 0.
+    auto output_spec_attr = output->getAttr("quant_recipe");
+    MLLM_RETURN_FALSE_IF_NOT(output_spec_attr);
+    auto output_spec_base =
+        output_spec_attr->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_;
+    MLLM_RETURN_FALSE_IF_NOT(output_spec_base->type == ir::linalg::QuantizationSpecType::kAsymPerTensor);
+    auto output_spec = std::static_pointer_cast<ir::linalg::QuantizationSpecAsymPerTensor>(output_spec_base);
+    MLLM_RETURN_FALSE_IF_NOT(output_spec->quant_to_type == kUInt8);
+
+    auto bias_tensor = Tensor::zeros({real_linear_op->options().out_channels}, kUInt8)
+                           .__unsafeSetDType(kUInt8PerTensorAsy);
+    bias_tensor.setName(base_op->getName() + ".explicit_zero_bias");
+    auto bias_val = writer.getContext()->create<ir::tensor::TensorValue>(bias_tensor);
+
+    auto bias_scale = Tensor::ones({1}, kFloat32);
+    bias_scale.at<float>({0}) = output_spec->scale.item<float>();
+    auto bias_zero_point = Tensor::zeros({1}, kInt32);
+    auto bias_spec = ir::linalg::QuantizationSpecAsymPerTensor::create(
+        0, 255, kUInt8, kFloat32, kInt32, bias_scale, bias_zero_point);
+    bias_val->setAttr("quant_recipe", writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(bias_spec));
+    qnn_op_node->emplaceInput(
+        env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, bias_val, true));
   }
 
   qnn_op_node->emplaceOutput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, output))

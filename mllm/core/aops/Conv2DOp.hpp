@@ -26,6 +26,11 @@ struct Conv2DOpOptions : public BaseOpOptions<Conv2DOpOptions> {
   std::vector<int32_t> padding;
   std::vector<int32_t> dilation;
   bool bias = true;
+  // Experiment-only QNN lowering knob. When true and bias is false, the QNN
+  // AOT visitor supplies a static, exactly-zero U8 bias tensor. The default is
+  // deliberately false so existing model graphs remain byte-for-byte
+  // unchanged at the logical-op boundary.
+  bool qnn_explicit_zero_bias = false;
   Conv2DOpImplType impl_type = Conv2DOpImplType::kDefault;
 };
 
