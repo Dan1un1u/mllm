@@ -42,8 +42,8 @@ bool envFlagEnabled(const char* name, bool fallback = false) {
   return value == "1" || value == "true" || value == "yes" || value == "on";
 }
 
-int experimentalFinalizePPoint() {
-  const char* raw = std::getenv("MLLM_QNN_AOT_FINALIZE_P");
+int parseExperimentalFinalizePPoint(const char* name) {
+  const char* raw = std::getenv(name);
   if (raw == nullptr || raw[0] == '\0') { return -1; }
 
   char* end = nullptr;
@@ -53,11 +53,29 @@ int experimentalFinalizePPoint() {
   if (end == raw || *end != '\0' || !valid.contains(parsed)) {
     MLLM_ERROR_EXIT(
         ExitCode::kCoreError,
-        "MLLM_QNN_AOT_FINALIZE_P must be a QAIRT 2.47 P point: "
+        "{} must be a QAIRT 2.47 P point: "
         "0,1,2,3,4,5,6,8,13,15,16,17,19,20,21,22,23; got '{}'",
-        raw);
+        name, raw);
   }
   return static_cast<int>(parsed);
+}
+
+int experimentalFinalizePPoint(const std::string& graph_name) {
+  // A full Qwen context contains independent decode (s1) and prefill (s32)
+  // graphs.  Let controlled AOT experiments tune them separately while
+  // preserving the original global variable as a backwards-compatible
+  // fallback.  If only one graph-specific variable is set, the other graph
+  // retains QAIRT's default search-point selection.
+  const char* graph_env = nullptr;
+  if (graph_name.ends_with(".s1")) {
+    graph_env = "MLLM_QNN_AOT_FINALIZE_P_S1";
+  } else if (graph_name.ends_with(".s32")) {
+    graph_env = "MLLM_QNN_AOT_FINALIZE_P_S32";
+  }
+  if (graph_env != nullptr && std::getenv(graph_env) != nullptr) {
+    return parseExperimentalFinalizePPoint(graph_env);
+  }
+  return parseExperimentalFinalizePPoint("MLLM_QNN_AOT_FINALIZE_P");
 }
 
 std::string safeArtifactName(std::string name) {
@@ -553,7 +571,7 @@ QnnAOTGraph::QnnAOTGraph(QNN_INTERFACE_VER_TYPE& qnnInterface, Qnn_BackendHandle
 
   // Optional O=3 compiler search point.  The default path remains unchanged;
   // this is exposed only for controlled offline AOT tuning experiments.
-  const int finalize_p = experimentalFinalizePPoint();
+  const int finalize_p = experimentalFinalizePPoint(graphName);
   if (finalize_p >= 0) {
     p_custom_config =
         static_cast<QnnHtpGraph_CustomConfig_t*>(calloc(1, sizeof(QnnHtpGraph_CustomConfig_t)));

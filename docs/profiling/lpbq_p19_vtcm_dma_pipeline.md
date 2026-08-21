@@ -5,6 +5,13 @@ Target: SM8750 / HTP V79
 QAIRT: 2.47.0.260601
 Branch: `codex/w4a8g32-lpbq-p-point-search`
 
+Follow-up (2026-08-22): the per-graph search proposed below is complete.
+P19 remains the W4A8 full-model choice; the s32 alternatives did not produce
+a repeatable E2E improvement. A parallel W4A16 search found that its archived
+compiler-default context is still the fastest validated full-model comparator.
+See `qwen3_a8_a16_p_point_fairness.md` for the paired performance and
+byte-identical W4A16 accuracy evidence.
+
 ## Outcome
 
 The experiment gate passes. QAIRT finalize search point P19 improves the
@@ -188,4 +195,3 @@ assuming that removing a logical bias removes the physical bias tile.
   `D:\llm_exp\results\qwen3_sm8750_v79_lpbq_p19_lm_head_20260821`
 - P19 full-model results and canonical report:
   `D:\llm_exp\results\qwen3_sm8750_v79_w4a8_rmsnorm_u8_p19_20260821_231318`
-
