@@ -42,6 +42,24 @@ bool envFlagEnabled(const char* name, bool fallback = false) {
   return value == "1" || value == "true" || value == "yes" || value == "on";
 }
 
+int experimentalFinalizePPoint() {
+  const char* raw = std::getenv("MLLM_QNN_AOT_FINALIZE_P");
+  if (raw == nullptr || raw[0] == '\0') { return -1; }
+
+  char* end = nullptr;
+  const long parsed = std::strtol(raw, &end, 10);
+  static const std::set<long> valid = {0, 1, 2, 3, 4, 5, 6, 8, 13,
+                                       15, 16, 17, 19, 20, 21, 22, 23};
+  if (end == raw || *end != '\0' || !valid.contains(parsed)) {
+    MLLM_ERROR_EXIT(
+        ExitCode::kCoreError,
+        "MLLM_QNN_AOT_FINALIZE_P must be a QAIRT 2.47 P point: "
+        "0,1,2,3,4,5,6,8,13,15,16,17,19,20,21,22,23; got '{}'",
+        raw);
+  }
+  return static_cast<int>(parsed);
+}
+
 std::string safeArtifactName(std::string name) {
   for (auto& c : name) {
     if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '_' && c != '-') { c = '_'; }
@@ -532,6 +550,20 @@ QnnAOTGraph::QnnAOTGraph(QNN_INTERFACE_VER_TYPE& qnnInterface, Qnn_BackendHandle
   p_custom_config->optimizationOption.type = QNN_HTP_GRAPH_OPTIMIZATION_TYPE_FINALIZE_OPTIMIZATION_FLAG;
   p_custom_config->optimizationOption.floatValue = 3;
   htp_graph_configs.push_back(static_cast<QnnGraph_CustomConfig_t>(p_custom_config));
+
+  // Optional O=3 compiler search point.  The default path remains unchanged;
+  // this is exposed only for controlled offline AOT tuning experiments.
+  const int finalize_p = experimentalFinalizePPoint();
+  if (finalize_p >= 0) {
+    p_custom_config =
+        static_cast<QnnHtpGraph_CustomConfig_t*>(calloc(1, sizeof(QnnHtpGraph_CustomConfig_t)));
+    MLLM_RT_ASSERT(p_custom_config != nullptr);
+    p_custom_config->option = QNN_HTP_GRAPH_CONFIG_OPTION_FINALIZE_CONFIG;
+    p_custom_config->finalizeConfig.key = "P";
+    p_custom_config->finalizeConfig.value.dataType = QNN_DATATYPE_INT_32;
+    p_custom_config->finalizeConfig.value.int32Value = finalize_p;
+    htp_graph_configs.push_back(static_cast<QnnGraph_CustomConfig_t>(p_custom_config));
+  }
 
   // VTCM Size
   p_custom_config = (QnnHtpGraph_CustomConfig_t*)malloc(sizeof(QnnHtpGraph_CustomConfig_t));
