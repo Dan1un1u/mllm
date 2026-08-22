@@ -96,31 +96,14 @@ _Avoid_: D-drive build tree, archived runtime build
 A completed model, context binary, or compact evidence bundle copied from the native WSL build workspace into its immutable experiment namespace under `D:\llm_exp`, with source and destination digests verified. Partial or failed working state is not a published artifact.
 _Avoid_: Build cache, staging directory, unverified copy
 
-## Clean-room implementation status
+**Custom masked E2Softmax experiment**:
+An isolated derivative of the native U8 RMSNorm experiment that replaces only the existing attention masking and Softmax sequence with a U8-input/U8-output, base-2 integer approximation implemented as an HTP custom operation. Its placement, numerical validity, model quality, and performance are independent verdicts.
+_Avoid_: Accepted Softmax baseline, model-accurate Softmax
 
-The native-U8 RMSNorm experiment is implemented as a clean-room derivative of
-the archived W4A16 path. No historical W4A8 code, artifact, log, or performance
-result is an input to this implementation. The source-to-context build from
-`Qwen3-origin` completes for both split-head graphs; the published manifests
-contain 1009 W4G32 LPBQ targets and 729 native-U8 RmsNorm operations per graph,
-with zero recipe-induced RMSNorm bridges.
+**Interior zero-DRAM Softmax contract**:
+The requirement that every real QK-to-probability-to-PV attention edge stays in Crouton VTCM with no MainMemory fallback, boundary VTCM conversion, compiler spill/fill, or custom-operation DRAM read/write for both s1 and s32. A graph-output numerical fixture is outside this placement measurement.
+_Avoid_: Low-DRAM Softmax, micrograph-only placement proof
 
-Runtime evidence is now complete in
-`D:\\llm_exp\\results\\qwen3_sm8750_v79_w4a8_rmsnorm_u8_20260813_220228`.
-The Windows adb executable (`C:\\adb\\adb.exe`) addressed the connected
-`PJZ110` device explicitly by serial; the separate old WSL adb server had no
-device. Three profiling-off runner rounds, the 100-case informational sanity
-suite, and fresh-process s1/s32 Optrace all completed. The measured medians
-were 788.252 prefill tokens/s and 37.942 decode tokens/s after first token.
-Against the requested W4A16 reference
-`qwen3_sm8750_v79_g32_20260807_230410`, these are -8.34% and -16.59%; this
-experiment has no speed or accuracy gate.
-
-The joint runtime audit passes for both graphs: 1009/1009 target operations
-were observed, 729/729 RmsNorm operations were traced, all target RmsNorm
-operations were physical U8 with zero U16 RmsNorm operations and zero explicit
-RmsNorm bridges. The canonical report is
-`qwen3-sm8750-v79-g32-e2e-critical-path.html` in the result directory. Large
-QAIRT viewer inputs/outputs are decoded in the native WSL workspace and then
-copied back to the D-drive result namespace; raw Optrace and compact evidence
-remain archived under `D:\\llm_exp`.
+**Masked E2Softmax implementation validity**:
+Evidence that device U8 outputs exactly match the independent integer contract and satisfy masking, nonzero-row, normalization, and top-1 invariants for both s1 and s32 over the full set of compiled score encodings. It does not imply acceptable floating-point approximation error or end-model quality.
+_Avoid_: Accuracy pass, usable generation quality
