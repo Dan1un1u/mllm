@@ -155,7 +155,7 @@ struct QnnDeviceAndContext {
   QnnBackend_Config_t** bk_cfg_ = nullptr;
   QnnContext_Config_t** qnn_context_config_ = nullptr;
   Qnn_ProfileHandle_t profile_bk_handle_ = nullptr;
-  Qnn_ContextHandle_t qnn_ctx_handle_;
+  Qnn_ContextHandle_t qnn_ctx_handle_ = nullptr;
   bool optrace_enabled_ = false;
 
   std::unordered_map<std::string, QnnAOTGraph::ptr_t> graphs_;              //< for persistence keep graphs.

@@ -904,6 +904,20 @@ std::shared_ptr<QnnDeviceAndContext> QnnAOTEnv::createContext(const std::string&
   MLLM_RT_ASSERT_EQ(QNN_BACKEND_NO_ERROR, qnn_htp_func_symbols_.qnn_interface_.backendCreate(context->log_, (const QnnBackend_Config_t**)context->bk_cfg_, &context->bk_handle_))
   // clang-format on
 
+  // Register an external package only when explicitly requested.  Keeping
+  // this environment-gated prevents the placement experiment from changing
+  // normal AOT compilation or the accepted RMSNorm-A8 baseline.
+  if (const char* op_package_path = std::getenv("MLLM_QNN_AOT_OP_PACKAGE_PATH");
+      op_package_path != nullptr && op_package_path[0] != '\0') {
+    const char* provider = std::getenv("MLLM_QNN_AOT_OP_PACKAGE_PROVIDER");
+    if (provider == nullptr || provider[0] == '\0') { provider = "LLaMAPackageInterfaceProvider"; }
+    MLLM_RT_ASSERT(qnn_htp_func_symbols_.qnn_interface_.backendRegisterOpPackage != nullptr);
+    auto status = qnn_htp_func_symbols_.qnn_interface_.backendRegisterOpPackage(
+        context->bk_handle_, op_package_path, provider, nullptr);
+    MLLM_RT_ASSERT_EQ(status, QNN_BACKEND_NO_ERROR);
+    MLLM_INFO("Registered AOT op package '{}' with provider '{}'", op_package_path, provider);
+  }
+
   // 2. Create HTP Device
   // clang-format off
   if (nullptr != qnn_htp_func_symbols_.qnn_interface_.deviceCreate) {
@@ -1001,7 +1015,36 @@ void QnnAOTEnv::saveContext(const std::string& name, const std::string& path) {
 }
 
 void QnnAOTEnv::destroyContext(const std::string& name) {
-  // TODO
+  const auto it = contexts_.find(name);
+  if (it == contexts_.end()) { return; }
+
+  auto& context = it->second;
+  context->graphs_.clear();
+  context->static_tensor_.clear();
+
+  if (context->qnn_ctx_handle_ != nullptr) {
+    MLLM_RT_ASSERT_EQ(qnn_htp_func_symbols_.qnn_interface_.contextFree(context->qnn_ctx_handle_, nullptr),
+                      QNN_CONTEXT_NO_ERROR);
+    context->qnn_ctx_handle_ = nullptr;
+  }
+  if (context->profile_bk_handle_ != nullptr) {
+    MLLM_RT_ASSERT_EQ(qnn_htp_func_symbols_.qnn_interface_.profileFree(context->profile_bk_handle_),
+                      QNN_PROFILE_NO_ERROR);
+    context->profile_bk_handle_ = nullptr;
+  }
+  if (context->device_handle_ != nullptr && qnn_htp_func_symbols_.qnn_interface_.deviceFree != nullptr) {
+    MLLM_RT_ASSERT_EQ(qnn_htp_func_symbols_.qnn_interface_.deviceFree(context->device_handle_), QNN_SUCCESS);
+    context->device_handle_ = nullptr;
+  }
+  if (context->bk_handle_ != nullptr) {
+    MLLM_RT_ASSERT_EQ(qnn_htp_func_symbols_.qnn_interface_.backendFree(context->bk_handle_), QNN_BACKEND_NO_ERROR);
+    context->bk_handle_ = nullptr;
+  }
+  if (context->log_ != nullptr) {
+    MLLM_RT_ASSERT_EQ(qnn_htp_func_symbols_.qnn_interface_.logFree(context->log_), QNN_SUCCESS);
+    context->log_ = nullptr;
+  }
+  contexts_.erase(it);
 }
 
 std::vector<QnnDevice_PlatformInfo_t*> QnnAOTEnv::createDevicePlatformInfo() {
