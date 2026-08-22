@@ -57,12 +57,22 @@ ACCURACY_MAX_NEW_TOKENS="${ACCURACY_MAX_NEW_TOKENS:-64}"
 AR_LEN="${AR_LEN:-32}"
 CLEAN_REMOTE="${CLEAN_REMOTE:-1}"
 RMSNORM_U8_CONTRACT="${RMSNORM_U8_CONTRACT:-0}"
+REMOTE_OP_PACKAGE_PATH="${REMOTE_OP_PACKAGE_PATH:-}"
+REMOTE_OP_PACKAGE_TARGET="${REMOTE_OP_PACKAGE_TARGET:-}"
 PROMPT="${PROMPT:-Explain how quantized Transformer inference maps matrix, vector, and data movement work onto a mobile NPU. Discuss attention, KV cache, MLP, and the cost of quantization conversions in enough detail to continue for at least sixty-four generated tokens.}"
 
 REMOTE_RUNNER="${BASELINE_REMOTE_RUNNER}"
 REMOTE_MODEL="${BASELINE_REMOTE_MODEL}"
 REMOTE_TOKENIZER="${BASELINE_REMOTE_TOKENIZER}"
 REMOTE_CONFIG="${BASELINE_REMOTE_CONFIG}"
+
+REMOTE_OP_PACKAGE_ENV=""
+if [[ -n "${REMOTE_OP_PACKAGE_PATH}" ]]; then
+    REMOTE_OP_PACKAGE_ENV="export MLLM_QNN_OP_PACKAGE_PATH='${REMOTE_OP_PACKAGE_PATH}' &&"
+fi
+if [[ -n "${REMOTE_OP_PACKAGE_TARGET}" ]]; then
+    REMOTE_OP_PACKAGE_ENV+=" export MLLM_QNN_OP_PACKAGE_TARGET='${REMOTE_OP_PACKAGE_TARGET}' &&"
+fi
 
 LOCAL_BUILD_BIN="${LOCAL_BUILD_BIN:-${REPO_ROOT}/build-android-arm64-v8a-qnn/bin}"
 ANDROID_NDK_PATH="${ANDROID_NDK_PATH:-${ANDROID_NDK_ROOT:-}}"
@@ -212,6 +222,7 @@ check_sha "s32 schematic" "${SCHEMATIC_DIR}/model.0.s32_schematic.bin" \
 
 mkdir -p "${RESULT_ROOT}/benchmark" "${RESULT_ROOT}/accuracy"
 if [[ -z "${RESUME_RESULT_ROOT}" ]]; then
+    cp "${CONTRACT_FILE}" "${RESULT_ROOT}/profile-contract.env"
     cp "${PROFILE_WRAPPER}" "${RESULT_ROOT}/experiment_script.sh"
     cp "${BASH_SOURCE[0]}" "${RESULT_ROOT}/base_profile_script.sh"
     cp "${ACCURACY_SUITE}" "${RESULT_ROOT}/accuracy/accuracy_suite.tsv"
@@ -256,6 +267,8 @@ fi
     echo "accuracy_suite=${ACCURACY_SUITE}"
     echo "accuracy_max_new_tokens=${ACCURACY_MAX_NEW_TOKENS}"
     echo "ar_len=${AR_LEN}"
+    echo "remote_op_package_path=${REMOTE_OP_PACKAGE_PATH:-none}"
+    echo "remote_op_package_target=${REMOTE_OP_PACKAGE_TARGET:-none}"
     echo "prompt=${PROMPT}"
     echo "benchmark_semantics=profiling off; fresh process per round; runner-level prefill/decode E2E"
     echo "accuracy_semantics=profiling off; one Runner reused with KV reset; greedy short-answer sanity suite"
@@ -345,6 +358,7 @@ for ((round = 1; round <= BENCHMARK_RUNS; ++round)); do
         cd '${REMOTE_DIR}' &&
         export LD_LIBRARY_PATH=.:${REMOTE_DIR} &&
         export ADSP_LIBRARY_PATH='${REMOTE_DIR}' &&
+        ${REMOTE_OP_PACKAGE_ENV}
         export MLLM_QNN_PROFILE_LEVEL=off &&
         export MLLM_QNN_PROFILE_DIR='${remote_run}' &&
         './${REMOTE_RUNNER}' \
@@ -379,6 +393,7 @@ set +e
     cd '${REMOTE_DIR}' &&
     export LD_LIBRARY_PATH=.:${REMOTE_DIR} &&
     export ADSP_LIBRARY_PATH='${REMOTE_DIR}' &&
+    ${REMOTE_OP_PACKAGE_ENV}
     export MLLM_QNN_PROFILE_LEVEL=off &&
     export MLLM_QNN_PROFILE_DIR='${remote_accuracy}' &&
     './${REMOTE_RUNNER}' \
@@ -421,6 +436,7 @@ for graph in s32 s1; do
         cd '${REMOTE_DIR}' &&
         export LD_LIBRARY_PATH=.:${REMOTE_DIR} &&
         export ADSP_LIBRARY_PATH='${REMOTE_DIR}' &&
+        ${REMOTE_OP_PACKAGE_ENV}
         export MLLM_QNN_PROFILE_LEVEL=optrace &&
         export MLLM_QNN_PROFILE_WARMUP=0 &&
         export MLLM_QNN_PROFILE_EVERY=1 &&

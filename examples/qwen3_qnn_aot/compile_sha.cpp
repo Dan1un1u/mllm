@@ -108,6 +108,12 @@ MLLM_MAIN({
     qnn_aot_env.saveContext("context.0", output_context_path.get());
   }
 
+  // External HTP op packages must be unloaded while the QNN backend and its
+  // context are still alive. Relying on process-exit destruction leaves the
+  // dynamic-loader/backend order unspecified and can double-free the package
+  // after a large context has already been serialized.
+  qnn_aot_env.destroyContext("context.0");
+
   mllm::print("SHA compilation completed successfully!");
   mllm::print("Output files:");
   if (trace_seq.get() == 0 || trace_seq.get() == 32) {

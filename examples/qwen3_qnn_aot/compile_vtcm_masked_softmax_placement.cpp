@@ -2,10 +2,8 @@
 // Licensed under the MIT License.
 
 // Compile an interior attention micrograph using the accepted layer-14 A8
-// encodings.  The graph is intentionally realistic at the placement boundary:
-//   QK MatMul -> scale -> TCM-only custom placeholder -> PV MatMul.
-// The custom op is not yet a mathematical Softmax implementation; this target
-// exists only to gate whether the score/probability edge can remain in VTCM.
+// encodings. The graph is intentionally realistic at the placement boundary:
+//   QK MatMul -> scale -> TCM-only masked E2Softmax -> PV MatMul.
 
 #include <array>
 #include <string_view>
@@ -59,9 +57,7 @@ void duplicateQparams(const mllm::ParameterFile::ptr_t& params) {
   copy("attn_value_matmul_output_qdq", kHeads);
 }
 
-void attachQparams(mllm::Tensor& tensor,
-                   const mllm::ParameterFile::ptr_t& params,
-                   const std::string& prefix,
+void attachQparams(mllm::Tensor& tensor, const mllm::ParameterFile::ptr_t& params, const std::string& prefix,
                    mllm::DataTypes dtype) {
   tensor = tensor.__unsafeSetDType(dtype);
   tensor.attach("scale", params->pull(prefix + ".scale").impl(), true);
@@ -85,24 +81,43 @@ class VtcmMaskedSoftmaxPlacementGraph final : public mllm::nn::Module {
       const auto& k = inputs[kHeads + kv_head];
       const auto& v = inputs[kHeads + kKvHeads + kv_head];
 
-      auto scores = mllm::models::qwen3::sha::ptq::QDQ(
-          this, mllm::nn::functional::matmul(q, k), "layers.14.self_attn.qk_matmul_output_qdq_h" + std::to_string(head));
+      auto scores = mllm::models::qwen3::sha::ptq::QDQ(this, mllm::nn::functional::matmul(q, k),
+                                                       "layers.14.self_attn.qk_matmul_output_qdq_h" + std::to_string(head));
       auto scale = mllm::Tensor::constant(1.0f / 11.313708498984761f, mllm::kFloat32);
-      scale = mllm::models::qwen3::sha::ptq::QDQ(
-          this, scale, "layers.14.self_attn.scaling_qdq_h" + std::to_string(head));
-      scores = mllm::models::qwen3::sha::ptq::QDQ(
-          this, scores.mulConstant(scale), "layers.14.self_attn.mul_0_output_qdq_h" + std::to_string(head));
+      scale = mllm::models::qwen3::sha::ptq::QDQ(this, scale, "layers.14.self_attn.scaling_qdq_h" + std::to_string(head));
+      scores = mllm::models::qwen3::sha::ptq::QDQ(this, scores.mulConstant(scale),
+                                                  "layers.14.self_attn.mul_0_output_qdq_h" + std::to_string(head));
 
       // The Add visitor is environment-gated to lower this single Add into
-      // LLaMAPackage::VtcmMaskedSoftmaxPlacement.
+      // LLaMAPackage::VtcmMaskedE2Softmax. The custom op consumes the mask as
+      // a predicate; it does not numerically add the mask's tiny U8 sentinel.
       auto probabilities = mllm::models::qwen3::sha::ptq::QDQ(
           this, scores + causal_mask, "layers.14.self_attn.softmax_output_qdq_h" + std::to_string(head));
-      auto output = mllm::models::qwen3::sha::ptq::QDQ(
-          this, mllm::nn::functional::matmul(probabilities, v),
-          "layers.14.self_attn.attn_value_matmul_output_qdq_h" + std::to_string(head));
+      auto output =
+          mllm::models::qwen3::sha::ptq::QDQ(this, mllm::nn::functional::matmul(probabilities, v),
+                                             "layers.14.self_attn.attn_value_matmul_output_qdq_h" + std::to_string(head));
       outputs.push_back(output);
     }
     return outputs;
+  }
+};
+
+// Separate observability fixture used only after the interior zero-DRAM gate
+// has passed. Exposing the probability tensor as graph output necessarily
+// adds graph-boundary format/memory traffic; that traffic is not part of the
+// placement contract and must never be profiled as if it were the real
+// QK -> Softmax -> PV interior graph.
+class VtcmMaskedSoftmaxNumericalGraph final : public mllm::nn::Module {
+ public:
+  explicit VtcmMaskedSoftmaxNumericalGraph(const std::string& name) : mllm::nn::Module(name) {}
+
+  std::vector<mllm::Tensor> forward(const std::vector<mllm::Tensor>& inputs,
+                                    const std::vector<mllm::AnyValue>& /*args*/) override {
+    MLLM_RT_ASSERT_EQ(inputs.size(), 2);
+    auto scores = inputs[0];
+    auto probabilities =
+        mllm::models::qwen3::sha::ptq::QDQ(this, scores + inputs[1], "layers.14.self_attn.softmax_output_qdq_h0");
+    return {probabilities};
   }
 };
 
@@ -115,14 +130,16 @@ MLLM_MAIN({
   auto& qnn_env = Argparse::add<std::string>("-qnn_env|--qnn_env_path").help("QAIRT x86 library path.");
   auto& output_context = Argparse::add<std::string>("-o|--output_context_name").help("Output context.");
   auto& seq_arg = Argparse::add<int>("--seq").help("Sequence length: 1 or 32.");
+  auto& numerical_fixture = Argparse::add<bool>("--numerical_fixture")
+                                .help("Expose one custom Softmax output for post-gate numerical validation.")
+                                .def(false);
 
   Argparse::parse(argc, argv);
   if (help.isSet()) {
     Argparse::printHelp();
     return 0;
   }
-  if (!model_path.isSet() || !qnn_aot_cfg.isSet() || !qnn_env.isSet() || !output_context.isSet()
-      || !seq_arg.isSet()) {
+  if (!model_path.isSet() || !qnn_aot_cfg.isSet() || !qnn_env.isSet() || !output_context.isSet() || !seq_arg.isSet()) {
     Argparse::printHelp();
     return 2;
   }
@@ -131,6 +148,36 @@ MLLM_MAIN({
   auto params = mllm::load(model_path.get(), mllm::ModelFileVersion::kV2);
   qwen3_qnn_aot::addCausalMaskParams(params);
   duplicateQparams(params);
+
+  if (numerical_fixture.get()) {
+    auto model = VtcmMaskedSoftmaxNumericalGraph("model");
+    model.load(params);
+
+    auto scores = mllm::Tensor::zeros({1, 1, seq_arg.get(), kContext}, mllm::kUInt8).setName("scores");
+    attachQparams(scores, params, qparamPrefix("mul_0_output_qdq", 0), mllm::kUInt8PerTensorAsy);
+    auto causal_mask =
+        mllm::Tensor::zeros({1, 1, seq_arg.get(), kContext}, qwen3_qnn_aot::kCausalMaskStorageType).setName("causal_mask");
+    attachQparams(causal_mask, params, "causal_mask", qwen3_qnn_aot::kCausalMaskQuantType);
+
+    mllm::ir::lowlevel::traceStart();
+    auto outputs = model(std::vector<mllm::Tensor>{scores, causal_mask});
+    auto ir = mllm::ir::lowlevel::traceStop();
+    (void)outputs;
+
+    auto qnn_aot_env =
+        mllm::qnn::aot::QnnAOTEnv(qnn_env.get(), mllm::qnn::aot::parseQcomTargetMachineFromJSONFile(qnn_aot_cfg.get()));
+    mllm::ir::PassManager pm(ir);
+    pm.reg(mllm::qnn::aot::createQnnAOTLoweringPipeline(&qnn_aot_env, qnn_aot_cfg.get(), params));
+    pm.run();
+
+    const auto stem = "vtcm_masked_e2softmax_numerical_s" + std::to_string(seq_arg.get());
+    mllm::redirect(stem + ".mir", [&]() { mllm::print(ir); });
+    qnn_aot_env.saveContext("context.0", output_context.get());
+    qnn_aot_env.destroyContext("context.0");
+    mllm::print("VTCM masked E2Softmax numerical-fixture compilation completed: " + output_context.get());
+    return 0;
+  }
+
   auto model = VtcmMaskedSoftmaxPlacementGraph("model");
   model.load(params);
 
@@ -151,8 +198,8 @@ MLLM_MAIN({
     attachQparams(v, params, qparamPrefix("v_cast_to_int8_qdq", head), mllm::kUInt8PerTensorSym);
     inputs.push_back(v);
   }
-  auto causal_mask = mllm::Tensor::zeros({1, 1, seq_arg.get(), kContext}, qwen3_qnn_aot::kCausalMaskStorageType)
-                         .setName("causal_mask");
+  auto causal_mask =
+      mllm::Tensor::zeros({1, 1, seq_arg.get(), kContext}, qwen3_qnn_aot::kCausalMaskStorageType).setName("causal_mask");
   attachQparams(causal_mask, params, "causal_mask", qwen3_qnn_aot::kCausalMaskQuantType);
   inputs.push_back(causal_mask);
 

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <cstdlib>
+
 #include "mllm/mllm.hpp"
 #include "mllm/nn/Nn.hpp"
 #include "mllm/nn/Module.hpp"
@@ -14,6 +16,11 @@
 #include "mllm/models/qwen3/configuration_qwen3.hpp"
 
 namespace mllm::models::qwen3 {
+
+inline bool useVtcmMaskedE2Softmax() {
+  const char* value = std::getenv("MLLM_QNN_VTCM_MASKED_E2_SOFTMAX");
+  return value != nullptr && value[0] != '\0' && value[0] != '0';
+}
 
 namespace ptq {
 
@@ -303,16 +310,22 @@ class Qwen3Attention final : public nn::Module {
     scale = ptq::QDQ(this, scale, "scaling_qdq");
     attn = ptq::QDQ(this, attn.mulConstant(scale), "mul_0_output_qdq");
 
-    // Masked Softmax
-    auto attn_min = ptq::QDQ(this, attn.min(-1, true), "reduce_min_output_qdq");
-    auto minus_value = Tensor::constant(-20, kFloat32);
-    minus_value = ptq::QDQ(this, minus_value, "neg_20_qdq");
-    auto attn_vv = ptq::QDQ(this, attn_min.addConstant(minus_value), "minus_0_output_qdq");
-    auto zero_constant = Tensor::constant(0.f, kFloat32);
-    zero_constant = ptq::QDQ_CONSTANT(this, zero_constant, "constant_zero");
-    attn = nn::functional::where(causal_mask.equalConstant(zero_constant), attn, attn_vv);
-    attn = ptq::QDQ(this, attn, "where_attn_qdq");
-    attn = ptq::QDQ(this, nn::functional::softmax(attn, -1), "softmax_output_qdq");
+    // Keep the ordinary graph description consistent with the authoritative
+    // split-head build: only the opt-in experiment replaces the native
+    // ReduceMin/Where/Softmax sequence.
+    if (useVtcmMaskedE2Softmax()) {
+      attn = ptq::QDQ(this, attn + causal_mask, "softmax_output_qdq");
+    } else {
+      auto attn_min = ptq::QDQ(this, attn.min(-1, true), "reduce_min_output_qdq");
+      auto minus_value = Tensor::constant(-20, kFloat32);
+      minus_value = ptq::QDQ(this, minus_value, "neg_20_qdq");
+      auto attn_vv = ptq::QDQ(this, attn_min.addConstant(minus_value), "minus_0_output_qdq");
+      auto zero_constant = Tensor::constant(0.f, kFloat32);
+      zero_constant = ptq::QDQ_CONSTANT(this, zero_constant, "constant_zero");
+      attn = nn::functional::where(causal_mask.equalConstant(zero_constant), attn, attn_vv);
+      attn = ptq::QDQ(this, attn, "where_attn_qdq");
+      attn = ptq::QDQ(this, nn::functional::softmax(attn, -1), "softmax_output_qdq");
+    }
     auto y = ptq::QDQ(this, nn::functional::matmul(attn, vh), "attn_value_matmul_output_qdq");
     y = y.transpose(1, 2).view({1, 1, -1, num_attention_heads_ * head_dim_}, /*ssa=*/true);
     y = o_proj_(y).view({1, -1, hidden_size_}, true);

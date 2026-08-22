@@ -36,7 +36,7 @@ DECLARE_PKG_OPS_OPTS_LIST(PKG_LLaMALinear)
 DECLARE_PKG_OPS_OPTS_LIST(PKG_LLaMADequantize)
 DECLARE_PKG_OPS_OPTS_LIST(PKG_LLaMASuperSiLU)
 DECLARE_PKG_OPS_OPTS_LIST(PKG_LLaMAQuantize)
-DECLARE_PKG_OPS_OPTS_LIST(PKG_VtcmMaskedSoftmaxPlacement)
+DECLARE_PKG_OPS_OPTS_LIST(PKG_VtcmMaskedE2Softmax)
 
 END_PKG_OPS_OPTS_LIST()
 
@@ -46,7 +46,7 @@ static constexpr auto sg_packageName = THIS_PKG_NAME_STR;  // package name passe
 static std::array<const char*, 18> sg_opNames{{"RMSNorm", "KVCache", "LLaMADequantizeAdd", "LLaMAMul", "LLaMAReLU",
                                                "CausalMask", "SiLU", "QLayerNorm", "RoPE", "RoPESimple", "WNop", "LLaMAAdd",
                                                "IRoPE", "LLaMALinear", "LLaMADequantize", "LLaMASuperSiLU", "LLaMAQuantize",
-                                               "VtcmMaskedSoftmaxPlacement"}};
+                                               "VtcmMaskedE2Softmax"}};
 
 static Qnn_ApiVersion_t sg_sdkApiVersion = QNN_HTP_API_VERSION_INIT;
 static QnnOpPackage_Info_t sg_packageInfo = QNN_OP_PACKAGE_INFO_INIT;
@@ -289,7 +289,7 @@ Qnn_ErrorHandle_t LLaMAPackageValidateOpConfig(Qnn_OpConfig_t opConfig) {
     if (opConfig.v1.numOfParams != 1 || opConfig.v1.numOfInputs != 1 || opConfig.v1.numOfOutputs != 1) {
       return QNN_OP_PACKAGE_ERROR_VALIDATION_FAILURE;
     }
-  } else if (std::string(opConfig.v1.typeName) == "VtcmMaskedSoftmaxPlacement") {
+  } else if (std::string(opConfig.v1.typeName) == "VtcmMaskedE2Softmax") {
     if (opConfig.v1.numOfParams != 0 || opConfig.v1.numOfInputs != 2 || opConfig.v1.numOfOutputs != 1) {
       return QNN_OP_PACKAGE_ERROR_VALIDATION_FAILURE;
     }
