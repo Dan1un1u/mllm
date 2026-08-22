@@ -27,6 +27,12 @@ if(MLLM_QUALCOMM_QNN_AOT_ON_X86_ENABLE)
   add_executable(mllm-qwen3-lpbq-a16-a8-projection-c compile_lpbq_a16_a8_projection.cpp)
   target_link_libraries(mllm-qwen3-lpbq-a16-a8-projection-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
   target_include_directories(mllm-qwen3-lpbq-a16-a8-projection-c PRIVATE ${MLLM_INCLUDE_DIR})
+
+  # Strict K/V head-packing diagnostic: the per-head SHA expression and one
+  # packed projection share the same A8 qparams and W4G32 LPBQ payload.
+  add_executable(mllm-qwen3-kv-head-packing-c compile_kv_head_packing.cpp)
+  target_link_libraries(mllm-qwen3-kv-head-packing-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+  target_include_directories(mllm-qwen3-kv-head-packing-c PRIVATE ${MLLM_INCLUDE_DIR})
 endif()
 
 add_executable(mllm-qwen3-aot-runner aot_run.cpp)
@@ -36,3 +42,7 @@ target_include_directories(mllm-qwen3-aot-runner PRIVATE ${MLLM_INCLUDE_DIR})
 add_executable(mllm-qwen3-lpbq-a16-a8-projection-runner run_lpbq_a16_a8_projection.cpp)
 target_link_libraries(mllm-qwen3-lpbq-a16-a8-projection-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
 target_include_directories(mllm-qwen3-lpbq-a16-a8-projection-runner PRIVATE ${MLLM_INCLUDE_DIR})
+
+add_executable(mllm-qwen3-kv-head-packing-runner run_kv_head_packing.cpp)
+target_link_libraries(mllm-qwen3-kv-head-packing-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+target_include_directories(mllm-qwen3-kv-head-packing-runner PRIVATE ${MLLM_INCLUDE_DIR})
