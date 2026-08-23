@@ -27,6 +27,13 @@ if(MLLM_QUALCOMM_QNN_AOT_ON_X86_ENABLE)
   add_executable(mllm-qwen3-lpbq-a16-a8-projection-c compile_lpbq_a16_a8_projection.cpp)
   target_link_libraries(mllm-qwen3-lpbq-a16-a8-projection-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
   target_include_directories(mllm-qwen3-lpbq-a16-a8-projection-c PRIVATE ${MLLM_INCLUDE_DIR})
+
+  # QK -> custom masked Softmax -> PV placement and numerical fixtures. The
+  # custom operation itself is enabled only while this compiler is running.
+  add_executable(mllm-qwen3-vtcm-masked-softmax-c compile_vtcm_masked_softmax_placement.cpp)
+  target_compile_definitions(mllm-qwen3-vtcm-masked-softmax-c PRIVATE MLLM_QWEN3_QNN_AOT_G32=1)
+  target_link_libraries(mllm-qwen3-vtcm-masked-softmax-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+  target_include_directories(mllm-qwen3-vtcm-masked-softmax-c PRIVATE ${MLLM_INCLUDE_DIR})
 endif()
 
 add_executable(mllm-qwen3-aot-runner aot_run.cpp)
@@ -36,3 +43,7 @@ target_include_directories(mllm-qwen3-aot-runner PRIVATE ${MLLM_INCLUDE_DIR})
 add_executable(mllm-qwen3-lpbq-a16-a8-projection-runner run_lpbq_a16_a8_projection.cpp)
 target_link_libraries(mllm-qwen3-lpbq-a16-a8-projection-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
 target_include_directories(mllm-qwen3-lpbq-a16-a8-projection-runner PRIVATE ${MLLM_INCLUDE_DIR})
+
+add_executable(mllm-qwen3-vtcm-masked-softmax-runner run_vtcm_masked_softmax_placement.cpp)
+target_link_libraries(mllm-qwen3-vtcm-masked-softmax-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+target_include_directories(mllm-qwen3-vtcm-masked-softmax-runner PRIVATE ${MLLM_INCLUDE_DIR})

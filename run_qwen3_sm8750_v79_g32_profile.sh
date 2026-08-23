@@ -57,6 +57,9 @@ ACCURACY_MAX_NEW_TOKENS="${ACCURACY_MAX_NEW_TOKENS:-64}"
 AR_LEN="${AR_LEN:-32}"
 CLEAN_REMOTE="${CLEAN_REMOTE:-1}"
 RMSNORM_U8_CONTRACT="${RMSNORM_U8_CONTRACT:-0}"
+REMOTE_OP_PACKAGE_PATH="${REMOTE_OP_PACKAGE_PATH:-}"
+REMOTE_OP_PACKAGE_PROVIDER="${REMOTE_OP_PACKAGE_PROVIDER:-LLaMAPackageInterfaceProvider}"
+REMOTE_OP_PACKAGE_TARGET="${REMOTE_OP_PACKAGE_TARGET:-HTP}"
 PROMPT="${PROMPT:-Explain how quantized Transformer inference maps matrix, vector, and data movement work onto a mobile NPU. Discuss attention, KV cache, MLP, and the cost of quantization conversions in enough detail to continue for at least sixty-four generated tokens.}"
 
 REMOTE_RUNNER="${BASELINE_REMOTE_RUNNER}"
@@ -256,6 +259,9 @@ fi
     echo "accuracy_suite=${ACCURACY_SUITE}"
     echo "accuracy_max_new_tokens=${ACCURACY_MAX_NEW_TOKENS}"
     echo "ar_len=${AR_LEN}"
+    echo "remote_op_package_path=${REMOTE_OP_PACKAGE_PATH:-none}"
+    echo "remote_op_package_provider=${REMOTE_OP_PACKAGE_PROVIDER}"
+    echo "remote_op_package_target=${REMOTE_OP_PACKAGE_TARGET}"
     echo "prompt=${PROMPT}"
     echo "benchmark_semantics=profiling off; fresh process per round; runner-level prefill/decode E2E"
     echo "accuracy_semantics=profiling off; one Runner reused with KV reset; greedy short-answer sanity suite"
@@ -307,6 +313,10 @@ for remote_file in "${REMOTE_RUNNER}" "${REMOTE_MODEL}" "${REMOTE_TOKENIZER}" "$
     "${ADB[@]}" shell "test -r '${REMOTE_DIR}/${remote_file}'" \
         || die "device artifact missing: ${REMOTE_DIR}/${remote_file}"
 done
+if [[ -n "${REMOTE_OP_PACKAGE_PATH}" ]]; then
+    "${ADB[@]}" shell "test -r '${REMOTE_OP_PACKAGE_PATH}'" \
+        || die "device op package missing: ${REMOTE_OP_PACKAGE_PATH}"
+fi
 REMOTE_CONTEXT_SHA="$("${ADB[@]}" shell "sha256sum '${REMOTE_DIR}/${REMOTE_MODEL}'" \
     | awk '{print $1}' | tr -d '\r')"
 [[ "${REMOTE_CONTEXT_SHA}" == "${EXPECTED_CONTEXT_SHA}" ]] \
@@ -345,6 +355,9 @@ for ((round = 1; round <= BENCHMARK_RUNS; ++round)); do
         cd '${REMOTE_DIR}' &&
         export LD_LIBRARY_PATH=.:${REMOTE_DIR} &&
         export ADSP_LIBRARY_PATH='${REMOTE_DIR}' &&
+        export MLLM_QNN_OP_PACKAGE_PATH='${REMOTE_OP_PACKAGE_PATH}' &&
+        export MLLM_QNN_OP_PACKAGE_PROVIDER='${REMOTE_OP_PACKAGE_PROVIDER}' &&
+        export MLLM_QNN_OP_PACKAGE_TARGET='${REMOTE_OP_PACKAGE_TARGET}' &&
         export MLLM_QNN_PROFILE_LEVEL=off &&
         export MLLM_QNN_PROFILE_DIR='${remote_run}' &&
         './${REMOTE_RUNNER}' \
@@ -379,6 +392,9 @@ set +e
     cd '${REMOTE_DIR}' &&
     export LD_LIBRARY_PATH=.:${REMOTE_DIR} &&
     export ADSP_LIBRARY_PATH='${REMOTE_DIR}' &&
+    export MLLM_QNN_OP_PACKAGE_PATH='${REMOTE_OP_PACKAGE_PATH}' &&
+    export MLLM_QNN_OP_PACKAGE_PROVIDER='${REMOTE_OP_PACKAGE_PROVIDER}' &&
+    export MLLM_QNN_OP_PACKAGE_TARGET='${REMOTE_OP_PACKAGE_TARGET}' &&
     export MLLM_QNN_PROFILE_LEVEL=off &&
     export MLLM_QNN_PROFILE_DIR='${remote_accuracy}' &&
     './${REMOTE_RUNNER}' \
@@ -421,6 +437,9 @@ for graph in s32 s1; do
         cd '${REMOTE_DIR}' &&
         export LD_LIBRARY_PATH=.:${REMOTE_DIR} &&
         export ADSP_LIBRARY_PATH='${REMOTE_DIR}' &&
+        export MLLM_QNN_OP_PACKAGE_PATH='${REMOTE_OP_PACKAGE_PATH}' &&
+        export MLLM_QNN_OP_PACKAGE_PROVIDER='${REMOTE_OP_PACKAGE_PROVIDER}' &&
+        export MLLM_QNN_OP_PACKAGE_TARGET='${REMOTE_OP_PACKAGE_TARGET}' &&
         export MLLM_QNN_PROFILE_LEVEL=optrace &&
         export MLLM_QNN_PROFILE_WARMUP=0 &&
         export MLLM_QNN_PROFILE_EVERY=1 &&

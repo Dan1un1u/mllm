@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <cstdlib>
+
 #include "mllm/core/TensorStorage.hpp"
 #include "mllm/mllm.hpp"
 #include "mllm/nn/Nn.hpp"
@@ -19,6 +21,11 @@
 #include "mllm/models/qwen3/configuration_qwen3.hpp"
 
 namespace mllm::models::qwen3::sha {
+
+inline bool useVtcmMaskedE2Softmax() {
+  const char* value = std::getenv("MLLM_QNN_VTCM_MASKED_E2_SOFTMAX");
+  return value != nullptr && value[0] != '\0' && value[0] != '0';
+}
 
 namespace ptq {
 
@@ -414,16 +421,21 @@ class Qwen3AttentionSHA final : public nn::Module {
       scale = ptq::QDQ(this, scale, "scaling_qdq_h" + h_str);
       attn = ptq::QDQ(this, attn.mulConstant(scale), "mul_0_output_qdq_h" + h_str);
 
-      // Masked Softmax
-      auto attn_min = ptq::QDQ(this, attn.min(-1, true), "reduce_min_output_qdq_h" + h_str);
-      auto minus_value = Tensor::constant(-20, kFloat32);
-      minus_value = ptq::QDQ(this, minus_value, "neg_20_qdq_h" + h_str);
-      auto attn_vv = ptq::QDQ(this, attn_min.addConstant(minus_value), "minus_0_output_qdq_h" + h_str);
-      auto zero_constant = Tensor::constant(0.f, kFloat32);
-      zero_constant = ptq::QDQ_CONSTANT(this, zero_constant, "constant_zero");
-      attn = nn::functional::where(causal_mask.equalConstant(zero_constant), attn, attn_vv);
-      attn = ptq::QDQ(this, attn, "where_attn_qdq_h" + h_str);
-      attn = ptq::QDQ(this, nn::functional::softmax(attn, -1), "softmax_output_qdq_h" + h_str);
+      // The opt-in marker is lowered to one fused custom masked Softmax.  The
+      // ordinary path remains byte-for-byte the accepted Qualcomm-native graph.
+      if (useVtcmMaskedE2Softmax()) {
+        attn = ptq::QDQ(this, attn + causal_mask, "softmax_output_qdq_h" + h_str);
+      } else {
+        auto attn_min = ptq::QDQ(this, attn.min(-1, true), "reduce_min_output_qdq_h" + h_str);
+        auto minus_value = Tensor::constant(-20, kFloat32);
+        minus_value = ptq::QDQ(this, minus_value, "neg_20_qdq_h" + h_str);
+        auto attn_vv = ptq::QDQ(this, attn_min.addConstant(minus_value), "minus_0_output_qdq_h" + h_str);
+        auto zero_constant = Tensor::constant(0.f, kFloat32);
+        zero_constant = ptq::QDQ_CONSTANT(this, zero_constant, "constant_zero");
+        attn = nn::functional::where(causal_mask.equalConstant(zero_constant), attn, attn_vv);
+        attn = ptq::QDQ(this, attn, "where_attn_qdq_h" + h_str);
+        attn = ptq::QDQ(this, nn::functional::softmax(attn, -1), "softmax_output_qdq_h" + h_str);
+      }
 
       // Output: attn @ V
       auto y_h = ptq::QDQ(this, nn::functional::matmul(attn, vh), "attn_value_matmul_output_qdq_h" + h_str);

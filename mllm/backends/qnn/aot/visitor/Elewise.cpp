@@ -8,6 +8,8 @@
 #include "mllm/backends/qnn/aot/visitor/Elewise.hpp"
 #include "mllm/backends/qnn/aot/passes/AOTCompileContext.hpp"
 
+#include <cstdlib>
+
 namespace mllm::qnn::aot {
 
 bool QnnAOTAddPattern::isMatch(const mllm::ir::op_ptr_t& op) {
@@ -33,7 +35,16 @@ bool QnnAOTAddPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& op) {
   auto i_0 = op->inputs().front()->cast_<ir::tensor::TensorValue>();
   auto i_1 = (*(std::next(op->inputs().begin())))->cast_<ir::tensor::TensorValue>();
   auto o_0 = op->outputs().front()->cast_<ir::tensor::TensorValue>();
-  auto qnn_op_node = QnnAOTNodeOperation::create("ElementWiseAdd");
+  const char* placement_flag = std::getenv("MLLM_QNN_VTCM_MASKED_E2_SOFTMAX");
+  const bool placement_enabled = placement_flag != nullptr && placement_flag[0] != '\0' && placement_flag[0] != '0';
+  const auto& score_shape = i_0->tensor_.shape();
+  const auto& mask_shape = i_1->tensor_.shape();
+  // Only the experimental [B, 1, S, 1024] score+causal-mask marker may
+  // become the custom op. Every residual/RoPE/MLP Add stays Qualcomm-native.
+  const bool use_vtcm_softmax =
+      placement_enabled && score_shape == mask_shape && score_shape.size() == 4 && score_shape.back() == 1024;
+  auto qnn_op_node = QnnAOTNodeOperation::create(use_vtcm_softmax ? "VtcmMaskedE2Softmax" : "ElementWiseAdd");
+  qnn_op_node->setPackageName(use_vtcm_softmax ? "LLaMAPackage" : "qti.aisw");
   qnn_op_node->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, i_0))
       ->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, i_1))
       ->emplaceOutput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, o_0))

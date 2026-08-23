@@ -108,6 +108,9 @@ MLLM_MAIN({
     qnn_aot_env.saveContext("context.0", output_context_path.get());
   }
 
+  // Keep external-op-package teardown ordered before backend library unload.
+  qnn_aot_env.destroyContext("context.0");
+
   mllm::print("SHA compilation completed successfully!");
   mllm::print("Output files:");
   if (trace_seq.get() == 0 || trace_seq.get() == 32) {
