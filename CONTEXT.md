@@ -96,6 +96,10 @@ _Avoid_: D-drive build tree, archived runtime build
 A completed model, context binary, or compact evidence bundle copied from the native WSL build workspace into its immutable experiment namespace under `D:\llm_exp`, with source and destination digests verified. Partial or failed working state is not a published artifact.
 _Avoid_: Build cache, staging directory, unverified copy
 
+**QAIRT-isolated RMSNorm A8 baseline**:
+A native-U8 RMSNorm baseline rebuilt and run entirely with one pinned QAIRT release while preserving the source model and logical quantization contract. Its compiler schedule belongs to that release and must be validated again rather than inherited by name from another QAIRT version.
+_Avoid_: In-place SDK upgrade, version-only relabel, assumed cross-version schedule
+
 ## Clean-room implementation status
 
 The native-U8 RMSNorm experiment is implemented as a clean-room derivative of
