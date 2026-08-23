@@ -34,6 +34,11 @@ std::string qparamPrefix(std::string_view base, int32_t head) {
   return std::string(kLayerPath) + std::string(base) + "_h" + std::to_string(head) + ".fake_quant";
 }
 
+bool useVtcmMaskedSoftmax() {
+  const char* enabled = std::getenv("MLLM_QNN_VTCM_MASKED_E2_SOFTMAX");
+  return enabled != nullptr && enabled[0] != '\0' && enabled[0] != '0';
+}
+
 void duplicateQparams(const mllm::ParameterFile::ptr_t& params) {
   const auto copy = [&](std::string_view base, int32_t count) {
     for (const auto suffix : {std::string_view{"scale"}, std::string_view{"zero_point"}}) {
@@ -78,11 +83,13 @@ class PlacementGraph final : public mllm::nn::Module {
       auto scores = mllm::models::qwen3::sha::ptq::QDQ(
           this, mllm::nn::functional::matmul(inputs[head], inputs[kHeads + kv_head]),
           "layers.14.self_attn.qk_matmul_output_qdq_h" + std::to_string(head));
-      auto scale = mllm::Tensor::constant(1.0f / 11.313708498984761f, mllm::kFloat32);
-      scale = mllm::models::qwen3::sha::ptq::QDQ(
-          this, scale, "layers.14.self_attn.scaling_qdq_h" + std::to_string(head));
-      scores = mllm::models::qwen3::sha::ptq::QDQ(
-          this, scores.mulConstant(scale), "layers.14.self_attn.mul_0_output_qdq_h" + std::to_string(head));
+      if (!useVtcmMaskedSoftmax()) {
+        auto scale = mllm::Tensor::constant(1.0f / 11.313708498984761f, mllm::kFloat32);
+        scale = mllm::models::qwen3::sha::ptq::QDQ(
+            this, scale, "layers.14.self_attn.scaling_qdq_h" + std::to_string(head));
+        scores = mllm::models::qwen3::sha::ptq::QDQ(
+            this, scores.mulConstant(scale), "layers.14.self_attn.mul_0_output_qdq_h" + std::to_string(head));
+      }
       auto probabilities = mllm::models::qwen3::sha::ptq::QDQ(
           this, scores + causal_mask, "layers.14.self_attn.softmax_output_qdq_h" + std::to_string(head));
       outputs.push_back(mllm::models::qwen3::sha::ptq::QDQ(
@@ -148,7 +155,7 @@ MLLM_MAIN({
     NumericalGraph model("model");
     model.load(params);
     auto scores = mllm::Tensor::zeros({1, 1, seq_arg.get(), kContext}, mllm::kUInt8).setName("scores");
-    attachQparams(scores, params, qparamPrefix("mul_0_output_qdq", 0), mllm::kUInt8PerTensorAsy);
+    attachQparams(scores, params, qparamPrefix("qk_matmul_output_qdq", 0), mllm::kUInt8PerTensorAsy);
     auto mask = mllm::Tensor::zeros({1, 1, seq_arg.get(), kContext}, qwen3_qnn_aot::kCausalMaskStorageType)
                     .setName("causal_mask");
     attachQparams(mask, params, "causal_mask", qwen3_qnn_aot::kCausalMaskQuantType);

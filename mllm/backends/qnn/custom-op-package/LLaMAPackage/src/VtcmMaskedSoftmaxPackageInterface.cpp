@@ -21,13 +21,13 @@
 
 DEFINE_UNIQ_TY()
 BEGIN_PKG_OPS_OPTS_LIST()
-DECLARE_PKG_OPS_OPTS_LIST(PKG_VtcmMaskedE2Softmax)
+DECLARE_PKG_OPS_OPTS_LIST(PKG_VtcmMaskedE2SoftmaxHd128)
 END_PKG_OPS_OPTS_LIST()
 
 namespace {
 
 constexpr auto kPackageName = THIS_PKG_NAME_STR;
-constexpr auto kOpName = "VtcmMaskedE2Softmax";
+constexpr auto kOpName = "VtcmMaskedE2SoftmaxHd128";
 std::array<const char*, 1> op_names{{kOpName}};
 Qnn_ApiVersion_t sdk_api_version = QNN_HTP_API_VERSION_INIT;
 QnnOpPackage_Info_t package_info = QNN_OP_PACKAGE_INFO_INIT;

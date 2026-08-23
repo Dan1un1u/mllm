@@ -18,7 +18,7 @@
 
 #include <hexagon_types.h>
 
-BEGIN_PKG_OP_DEFINITION(PKG_VtcmMaskedE2Softmax);
+BEGIN_PKG_OP_DEFINITION(PKG_VtcmMaskedE2SoftmaxHd128);
 
 namespace {
 
@@ -28,6 +28,7 @@ constexpr int kRowsPerVector = kVectorBytes / kDepthLanes;
 constexpr uint8_t kMaskedCode = 15;
 constexpr uint8_t kLargestExponentCode = 14;
 constexpr uint32_t kReciprocalFractionBits = 23;
+constexpr float kHeadDim128AttentionBeta = 0.08838834764831845f;
 
 static_assert(kVectorBytes == 128, "The Crouton row kernel requires 128-byte HVX");
 static_assert(kRowsPerVector == 4);
@@ -55,9 +56,9 @@ inline void storeVector(uint8_t* ptr, HVX_Vector value) {
   q6op_vstu_AV(reinterpret_cast<HVX_Vector*>(ptr), value);
 }
 
-inline uint8_t quantizedExponentCoefficient(float score_scale) {
+inline uint8_t quantizedExponentCoefficient(float score_scale, float beta) {
   // SOLE's 1/ln(2) approximation: 1.4375 = 1 + 1/2 - 1/16.
-  const int32_t q8 = static_cast<int32_t>(score_scale * 1.4375f * 256.0f + 0.5f);
+  const int32_t q8 = static_cast<int32_t>(score_scale * beta * 1.4375f * 256.0f + 0.5f);
   return clampU8(std::max<int32_t>(1, q8));
 }
 
@@ -103,8 +104,8 @@ inline int probabilityTableOffset(int row, int code) {
 
 }  // namespace
 
-GraphStatus vtcmMaskedE2Softmax(QUint8CroutonTensor_TCM& out, const QUint8CroutonTensor_TCM& scores,
-                                const QUint8CroutonTensor_TCM& mask) {
+GraphStatus vtcmMaskedE2SoftmaxHd128(QUint8CroutonTensor_TCM& out, const QUint8CroutonTensor_TCM& scores,
+                                     const QUint8CroutonTensor_TCM& mask) {
   out.set_dims(scores);
   if (scores.dims() != mask.dims() || scores.dim(3) == 0 || scores.dim(3) % kDepthLanes != 0) {
     return GraphStatus::ErrorDimensions;
@@ -116,7 +117,8 @@ GraphStatus vtcmMaskedE2Softmax(QUint8CroutonTensor_TCM& out, const QUint8Crouto
   const int32_t output_levels_i = static_cast<int32_t>(out.interface_scale_recip() + 0.5f);
   const uint32_t output_levels =
       static_cast<uint32_t>(std::max<int32_t>(1, std::min<int32_t>(255, output_levels_i)));
-  const uint8_t exponent_coefficient = quantizedExponentCoefficient(scores.interface_scale());
+  const uint8_t exponent_coefficient =
+      quantizedExponentCoefficient(scores.interface_scale(), kHeadDim128AttentionBeta);
 
   const HVX_Vector vzero = Q6_V_vzero();
   const HVX_Vector vmask_zero = splatU8(mask_zero);
@@ -219,9 +221,10 @@ GraphStatus vtcmMaskedE2Softmax(QUint8CroutonTensor_TCM& out, const QUint8Crouto
 
 // No MainMemory or generic Tensor registration: failed TCM placement must
 // abort graph finalization instead of silently introducing DRAM traffic.
-DEF_PACKAGE_OP_AND_COST_AND_FLAGS((vtcmMaskedE2Softmax), "VtcmMaskedE2Softmax", FAST, Flags::RESOURCE_HVX)
+DEF_PACKAGE_OP_AND_COST_AND_FLAGS((vtcmMaskedE2SoftmaxHd128), "VtcmMaskedE2SoftmaxHd128", FAST,
+                                  Flags::RESOURCE_HVX)
 
-DEF_TENSOR_PROPERTIES(Op("VtcmMaskedE2Softmax", "scores", "mask"), Crouton("*", "scores", "mask"),
+DEF_TENSOR_PROPERTIES(Op("VtcmMaskedE2SoftmaxHd128", "scores", "mask"), Crouton("*", "scores", "mask"),
                       Tcm("*", "scores", "mask"))
 
-END_PKG_OP_DEFINITION(PKG_VtcmMaskedE2Softmax);
+END_PKG_OP_DEFINITION(PKG_VtcmMaskedE2SoftmaxHd128);

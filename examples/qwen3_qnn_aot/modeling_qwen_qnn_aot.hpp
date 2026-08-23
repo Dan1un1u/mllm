@@ -306,9 +306,6 @@ class Qwen3Attention final : public nn::Module {
 
     // Attn
     auto attn = ptq::QDQ(this, nn::functional::matmul(query_states, kh), "qk_matmul_output_qdq");
-    auto scale = Tensor::constant(scale_, kFloat32);
-    scale = ptq::QDQ(this, scale, "scaling_qdq");
-    attn = ptq::QDQ(this, attn.mulConstant(scale), "mul_0_output_qdq");
 
     // Keep the accepted graph unchanged unless the isolated custom-Softmax
     // experiment is explicitly enabled.  The marker Add is recognized by the
@@ -317,6 +314,9 @@ class Qwen3Attention final : public nn::Module {
     if (useVtcmMaskedE2Softmax()) {
       attn = ptq::QDQ(this, attn + causal_mask, "softmax_output_qdq");
     } else {
+      auto scale = Tensor::constant(scale_, kFloat32);
+      scale = ptq::QDQ(this, scale, "scaling_qdq");
+      attn = ptq::QDQ(this, attn.mulConstant(scale), "mul_0_output_qdq");
       auto attn_min = ptq::QDQ(this, attn.min(-1, true), "reduce_min_output_qdq");
       auto minus_value = Tensor::constant(-20, kFloat32);
       minus_value = ptq::QDQ(this, minus_value, "neg_20_qdq");

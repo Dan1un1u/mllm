@@ -43,7 +43,8 @@ bool QnnAOTAddPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& op) {
   // become the custom op. Every residual/RoPE/MLP Add stays Qualcomm-native.
   const bool use_vtcm_softmax =
       placement_enabled && score_shape == mask_shape && score_shape.size() == 4 && score_shape.back() == 1024;
-  auto qnn_op_node = QnnAOTNodeOperation::create(use_vtcm_softmax ? "VtcmMaskedE2Softmax" : "ElementWiseAdd");
+  auto qnn_op_node =
+      QnnAOTNodeOperation::create(use_vtcm_softmax ? "VtcmMaskedE2SoftmaxHd128" : "ElementWiseAdd");
   qnn_op_node->setPackageName(use_vtcm_softmax ? "LLaMAPackage" : "qti.aisw");
   qnn_op_node->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, i_0))
       ->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, i_1))

@@ -416,16 +416,14 @@ class Qwen3AttentionSHA final : public nn::Module {
       // QK^T
       auto attn = ptq::QDQ(this, nn::functional::matmul(q_h, kh), "qk_matmul_output_qdq_h" + h_str);
 
-      // Scale
-      auto scale = Tensor::constant(scale_, kFloat32);
-      scale = ptq::QDQ(this, scale, "scaling_qdq_h" + h_str);
-      attn = ptq::QDQ(this, attn.mulConstant(scale), "mul_0_output_qdq_h" + h_str);
-
       // The opt-in marker is lowered to one fused custom masked Softmax.  The
       // ordinary path remains byte-for-byte the accepted Qualcomm-native graph.
       if (useVtcmMaskedE2Softmax()) {
         attn = ptq::QDQ(this, attn + causal_mask, "softmax_output_qdq_h" + h_str);
       } else {
+        auto scale = Tensor::constant(scale_, kFloat32);
+        scale = ptq::QDQ(this, scale, "scaling_qdq_h" + h_str);
+        attn = ptq::QDQ(this, attn.mulConstant(scale), "mul_0_output_qdq_h" + h_str);
         auto attn_min = ptq::QDQ(this, attn.min(-1, true), "reduce_min_output_qdq_h" + h_str);
         auto minus_value = Tensor::constant(-20, kFloat32);
         minus_value = ptq::QDQ(this, minus_value, "neg_20_qdq_h" + h_str);

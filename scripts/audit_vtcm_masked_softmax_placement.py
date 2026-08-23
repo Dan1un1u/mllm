@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 
-OP_TYPE = "LLaMAPackage::VtcmMaskedE2Softmax"
+OP_TYPE = "LLaMAPackage::VtcmMaskedE2SoftmaxHd128"
 
 
 def scalar(node: dict[str, Any], name: str) -> int:

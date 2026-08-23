@@ -142,7 +142,10 @@ endif
 
 endif
 OP_SOURCES = $(wildcard $(OP_SRC_DIR)/*.cpp)
-OTHER_SOURCES = $(wildcard $(SRC_DIR)/*.cpp)
+# The minimal Softmax prepare interface is linked manually into an isolated
+# x86 package.  Device packages must keep the canonical LLaMAPackage interface
+# and therefore must not compile this second set of package-global symbols.
+OTHER_SOURCES = $(filter-out $(SRC_DIR)/VtcmMaskedSoftmaxPackageInterface.cpp,$(wildcard $(SRC_DIR)/*.cpp))
 HFILES = $(wildcard $(QNN_INCLUDE)/*.h)
 HFILES += $(wildcard $(QNN_INCLUDE)/HTP/*.h)
 HFILES += $(wildcard $(QNN_INCLUDE)/HTP/core/*.h)
