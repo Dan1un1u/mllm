@@ -113,7 +113,8 @@ ir::linalg::LinalgIRQuantizatonSpecAttr::ptr_t genSimpleQuantizationSpecAttr(con
     case kInt64:
     case kBFloat16:
     case kFloat16:
-    case kFloat32: {
+    case kFloat32:
+    case kBool: {
       spec = ir::linalg::QuantizationSpecRaw::create(v->tensor_.dtype());
       break;
     }

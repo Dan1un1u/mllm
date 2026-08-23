@@ -148,6 +148,8 @@ Tensor rotateHalf(Tensor x, nn::Module* m, const std::string& qdq_name_in_pytorc
 using vi32 = std::vector<int32_t>;
 #ifdef MLLM_QWEN3_QNN_AOT_G32
 #define QWEN3_QNN_AOT_LPBQ_IMPL aops::Conv2DOpImplType::kQNN_LPBQ_w4a8o8_G32
+#elif defined(MLLM_QWEN3_QNN_AOT_A16_G32)
+#define QWEN3_QNN_AOT_LPBQ_IMPL aops::Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G32
 #else
 #define QWEN3_QNN_AOT_LPBQ_IMPL aops::Conv2DOpImplType::kQNN_LPBQ_w4a16o16_G16
 #endif
@@ -279,12 +281,12 @@ class Qwen3AttentionSHA final : public nn::Module {
   }
 
   std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>& args) override {
+    MLLM_RT_ASSERT(inputs.size() == 4 || inputs.size() == 6);
     auto hidden_states = inputs[0];
     auto llm_embedding_sin = inputs[1];
     auto llm_embedding_cos = inputs[2];
     auto causal_mask = inputs[3];
-    const auto& past_key = inputs[4];    // [B, num_kv_heads, D, S]
-    const auto& past_value = inputs[5];  // [B, num_kv_heads, S, D]
+    const bool has_past = inputs.size() == 6;
 
     // [B, S, D] - shared QDQ for input to all Q/K/V projections
     hidden_states = ptq::QDQ(this, hidden_states, "q_proj_input_qdq");
@@ -382,13 +384,19 @@ class Qwen3AttentionSHA final : public nn::Module {
       new_key_per_head.push_back(k_h);
       new_value_per_head.push_back(v_h);
 
-      // Slice past cache for this head
-      auto past_k_h = past_key.slice({kAll, {h, h + 1}, kAll, kAll}, true);
-      auto past_v_h = past_value.slice({kAll, {h, h + 1}, kAll, kAll}, true);
-
-      // Concat current with past
-      key_cache_per_head.push_back(nn::functional::concat({past_k_h, k_h}, -1));
-      value_cache_per_head.push_back(nn::functional::concat({past_v_h, v_h}, 2));
+      if (has_past) {
+        // Slice past cache for this head and append the current chunk.
+        auto past_k_h = inputs[4].slice({kAll, {h, h + 1}, kAll, kAll}, true);
+        auto past_v_h = inputs[5].slice({kAll, {h, h + 1}, kAll, kAll}, true);
+        key_cache_per_head.push_back(nn::functional::concat({past_k_h, k_h}, -1));
+        value_cache_per_head.push_back(nn::functional::concat({past_v_h, v_h}, 2));
+      } else {
+        // The initial prefill chunk has no semantic past.  Keep only its
+        // current tokens so QK, Softmax, and AV never materialize unused
+        // cache columns.
+        key_cache_per_head.push_back(k_h);
+        value_cache_per_head.push_back(v_h);
+      }
     }
 
     // ========================================================================
@@ -419,9 +427,13 @@ class Qwen3AttentionSHA final : public nn::Module {
       auto minus_value = Tensor::constant(-20, kFloat32);
       minus_value = ptq::QDQ(this, minus_value, "neg_20_qdq_h" + h_str);
       auto attn_vv = ptq::QDQ(this, attn_min.addConstant(minus_value), "minus_0_output_qdq_h" + h_str);
-      auto zero_constant = Tensor::constant(0.f, kFloat32);
-      zero_constant = ptq::QDQ_CONSTANT(this, zero_constant, "constant_zero");
-      attn = nn::functional::where(causal_mask.equalConstant(zero_constant), attn, attn_vv);
+      if (causal_mask.dtype() == kBool) {
+        attn = nn::functional::where(causal_mask, attn, attn_vv);
+      } else {
+        auto zero_constant = Tensor::constant(0.f, kFloat32);
+        zero_constant = ptq::QDQ_CONSTANT(this, zero_constant, "constant_zero");
+        attn = nn::functional::where(causal_mask.equalConstant(zero_constant), attn, attn_vv);
+      }
       attn = ptq::QDQ(this, attn, "where_attn_qdq_h" + h_str);
       attn = ptq::QDQ(this, nn::functional::softmax(attn, -1), "softmax_output_qdq_h" + h_str);
 
@@ -470,17 +482,20 @@ class Qwen3DecoderSHA final : public nn::Module {
   }
 
   std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>& args) override {
+    MLLM_RT_ASSERT(inputs.size() == 4 || inputs.size() == 6);
     auto llm_embedding_sin = inputs[1];
     auto llm_embedding_cos = inputs[2];
     auto causal_mask = inputs[3];
-    auto past_key = inputs[4];
-    auto past_value = inputs[5];
 
     auto hidden_states = inputs[0];
     if (layer_idx_ != 0) { hidden_states = ptq::QDQ(this, hidden_states, "input_layernorm_input_qdq"); }
     auto residual = hidden_states;
     hidden_states = input_layer_norm_(hidden_states);
-    auto _ = self_attn_(hidden_states, llm_embedding_sin, llm_embedding_cos, causal_mask, past_key, past_value);
+    auto _ = inputs.size() == 6
+                 ? self_attn_(hidden_states, llm_embedding_sin, llm_embedding_cos,
+                              causal_mask, inputs[4], inputs[5])
+                 : self_attn_(hidden_states, llm_embedding_sin, llm_embedding_cos,
+                              causal_mask);
     hidden_states = _[0];
     hidden_states = ptq::QDQ(this, residual + ptq::QDQ(this, hidden_states, "add_0_lhs_input_qdq"), "add_0_output_qdq");
     residual = hidden_states;
@@ -499,11 +514,13 @@ class Qwen3TextSHA final : public nn::Module {
   nn::Param rope_cos_;
   int32_t num_hidden_layers_;
   int32_t hidden_size_;
+  bool last_token_only_hidden_;
 
  public:
   Qwen3TextSHA() = default;
 
-  Qwen3TextSHA(const std::string& name, const Qwen3Config& cfg) : nn::Module(name) {
+  Qwen3TextSHA(const std::string& name, const Qwen3Config& cfg, bool last_token_only_hidden = false)
+      : nn::Module(name), last_token_only_hidden_(last_token_only_hidden) {
     num_hidden_layers_ = cfg.num_hidden_layers;
     hidden_size_ = cfg.hidden_size;
     decode_blocks_ = reg<nn::ModuleListWithIdx<Qwen3DecoderSHA>>("layers", cfg.num_hidden_layers, cfg);
@@ -517,14 +534,19 @@ class Qwen3TextSHA final : public nn::Module {
   std::vector<Tensor> forward(const std::vector<Tensor>& inputs, const std::vector<AnyValue>& args) override {
     auto& blocks = decode_blocks_.list();
 
-    // X is already embedded
-    // QNN Gather requires its UInt16 table and output carriers to match.  The
-    // explicit HTP Convert makes the gathered values A8 activations without
-    // changing the preserved UInt16 embedding storage.
+    // X is already embedded.  The A8 path keeps the embedding table UInt16
+    // and converts only its output carrier; the A16 controls retain the
+    // original UInt16 graph without requesting A8 calibration parameters.
+#ifdef MLLM_QWEN3_QNN_AOT_G32
     auto x = ptq::QDQ(this, embedding_(inputs[0]).to(kUInt8PerTensorAsy), "embed_tokens_output_qdq");
+#else
+    auto x = embedding_(inputs[0]);
+#endif
 
     const auto& position_ids = inputs[1];
     auto causal_mask = inputs[2];
+    const bool has_past = inputs.size() == static_cast<size_t>(3 + 2 * num_hidden_layers_);
+    MLLM_RT_ASSERT(has_past || inputs.size() == 3);
 
     // clang-format off
     auto llm_embedding_sin = nn::functional::gather(ptq::QDQ_ROPE(this, rope_sin_(), "sin_embedding_input_qdq"), 1, position_ids);
@@ -534,9 +556,10 @@ class Qwen3TextSHA final : public nn::Module {
     std::vector<Tensor> keys;
     std::vector<Tensor> values;
     for (auto [index, block] : enumerate(blocks)) {
-      auto pk = inputs[3 + index];
-      auto pv = inputs[3 + index + num_hidden_layers_];
-      auto _ = block(x, llm_embedding_sin, llm_embedding_cos, causal_mask, pk, pv);
+      auto _ = has_past
+                   ? block(x, llm_embedding_sin, llm_embedding_cos, causal_mask,
+                           inputs[3 + index], inputs[3 + index + num_hidden_layers_])
+                   : block(x, llm_embedding_sin, llm_embedding_cos, causal_mask);
       x = _[0];
       keys.push_back(_[1]);
       values.push_back(_[2]);
@@ -544,7 +567,10 @@ class Qwen3TextSHA final : public nn::Module {
 
     x = norm_(ptq::QDQ(this, x, "norm_input_qdq"));
     x = x.view({1, 1, -1, hidden_size_}, true);
-
+    if (last_token_only_hidden_ && x.shape()[2] > 1) {
+      const auto sequence_length = x.shape()[2];
+      x = x.slice({kAll, kAll, {sequence_length - 1, sequence_length}, kAll}, true);
+    }
     auto ret = std::vector<Tensor>{x};
     for (const auto& item : keys) { ret.push_back(item); }
     for (const auto& item : values) { ret.push_back(item); }
@@ -555,12 +581,15 @@ class Qwen3TextSHA final : public nn::Module {
 
 class Qwen3ForCausalLM_SHA : public ARGeneration, public nn::Module {
  public:
-  explicit Qwen3ForCausalLM_SHA(const Qwen3Config& cfg) : cfg(cfg) {
+  explicit Qwen3ForCausalLM_SHA(const Qwen3Config& cfg, bool last_token_only_logits = false,
+                                bool cache_only = false)
+      : cfg(cfg), cache_only_(cache_only) {
+    MLLM_RT_ASSERT(!(last_token_only_logits && cache_only));
     eos_token_id_ = cfg.end_of_text_token_id;
     max_length_ = cfg.max_cache_length;
     tie_word_embeddings_ = cfg.tie_word_embeddings;
 
-    llm = reg<Qwen3TextSHA>("model", cfg);
+    llm = reg<Qwen3TextSHA>("model", cfg, last_token_only_logits);
 
     if (cfg.tie_word_embeddings) {
       // NOTE:
@@ -578,29 +607,24 @@ class Qwen3ForCausalLM_SHA : public ARGeneration, public nn::Module {
 
     std::vector<Tensor> kv_caches;
 
-    // Append Key
-    for (int i = 0; i < cfg.num_hidden_layers; ++i) {
-      auto past_key_name = "past_key_" + std::to_string(i);
-      if (input.count(past_key_name)) {
+    const bool has_any_cache = input.count("past_key_0") || input.count("past_value_0");
+    if (has_any_cache) {
+      // Append Key
+      for (int i = 0; i < cfg.num_hidden_layers; ++i) {
+        auto past_key_name = "past_key_" + std::to_string(i);
+        if (!input.count(past_key_name)) {
+          throw std::runtime_error("Missing KV cache for layer " + std::to_string(i));
+        }
         kv_caches.push_back(input.at(past_key_name));
-      } else {
-        // If KV cache doesn't exist, we need to handle this case
-        // For now, we'll create empty tensors or handle it appropriately
-        // This might need adjustment based on your initialization logic
-        throw std::runtime_error("Missing KV cache for layer " + std::to_string(i));
       }
-    }
 
-    // Append Value
-    for (int i = 0; i < cfg.num_hidden_layers; ++i) {
-      auto past_value_name = "past_value_" + std::to_string(i);
-      if (input.count(past_value_name)) {
+      // Append Value
+      for (int i = 0; i < cfg.num_hidden_layers; ++i) {
+        auto past_value_name = "past_value_" + std::to_string(i);
+        if (!input.count(past_value_name)) {
+          throw std::runtime_error("Missing KV cache for layer " + std::to_string(i));
+        }
         kv_caches.push_back(input.at(past_value_name));
-      } else {
-        // If KV cache doesn't exist, we need to handle this case
-        // For now, we'll create empty tensors or handle it appropriately
-        // This might need adjustment based on your initialization logic
-        throw std::runtime_error("Missing KV cache for layer " + std::to_string(i));
       }
     }
 
@@ -632,9 +656,12 @@ class Qwen3ForCausalLM_SHA : public ARGeneration, public nn::Module {
     std::vector<Tensor> llm_inputs = {sequence, position_ids, causal_mask};
     llm_inputs.insert(llm_inputs.end(), kv_caches.begin(), kv_caches.end());
 
-    sequence = llm(llm_inputs)[0];
-    sequence = lm_head_(ptq::QDQ(this, sequence, "lm_head_input_qdq"));
-    sequence = ptq::QDQ(this, sequence, "lm_head_output_qdq");
+    auto llm_outputs = llm(llm_inputs);
+    sequence = ptq::QDQ(this, llm_outputs[0], "lm_head_input_qdq");
+    if (!cache_only_) {
+      sequence = lm_head_(sequence);
+      sequence = ptq::QDQ(this, sequence, "lm_head_output_qdq");
+    }
     ir::lowlevel::traceComment("    ╔═════╗   ");
     ir::lowlevel::traceComment("   ║  o o  ║  ");
     ir::lowlevel::traceComment("   ║   ▽   ║  ");
@@ -653,6 +680,7 @@ class Qwen3ForCausalLM_SHA : public ARGeneration, public nn::Module {
   Qwen3TextSHA llm;
   nn::Conv2D lm_head_;
   bool tie_word_embeddings_;
+  bool cache_only_;
 };
 
 // ============================================================================

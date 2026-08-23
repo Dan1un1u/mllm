@@ -33,7 +33,10 @@ MLLM_MAIN({
                              .help("Finalize graph(s) and emit Optrace schematics without saving a context binary.");
   auto& trace_seq = Argparse::add<int>("--trace_seq")
                         .def(0)
-                        .help("Trace only one graph (1 or 32); 0 traces both graphs.");
+                        .help("Trace only one graph (1 or prefill_seq); 0 traces both graphs.");
+  auto& prefill_seq = Argparse::add<int>("--prefill_seq")
+                          .def(32)
+                          .help("Prompt-processing graph sequence length.");
 
   Argparse::parse(argc, argv);
 
@@ -54,8 +57,11 @@ MLLM_MAIN({
     Argparse::printHelp();
     return -1;
   }
-  if (trace_seq.get() != 0 && trace_seq.get() != 1 && trace_seq.get() != 32) {
-    MLLM_ERROR_EXIT(mllm::ExitCode::kCoreError, "--trace_seq must be 0, 1, or 32");
+  if (prefill_seq.get() <= 1 || prefill_seq.get() > kContextLength) {
+    MLLM_ERROR_EXIT(mllm::ExitCode::kCoreError, "--prefill_seq must be in [2, 1024]");
+  }
+  if (trace_seq.get() != 0 && trace_seq.get() != 1 && trace_seq.get() != prefill_seq.get()) {
+    MLLM_ERROR_EXIT(mllm::ExitCode::kCoreError, "--trace_seq must be 0, 1, or prefill_seq");
   }
 
   auto model_cfg = mllm::models::qwen3::Qwen3Config(model_cfg_path.get());
@@ -97,8 +103,8 @@ MLLM_MAIN({
     mllm::redirect(mir_path, [&]() { mllm::print(ir["model"]); });
   };
 
-  if (trace_seq.get() == 0 || trace_seq.get() == 32) {
-    trace_and_dump(32, "qwen3_qnn_aot_sha_32.mir");
+  if (trace_seq.get() == 0 || trace_seq.get() == prefill_seq.get()) {
+    trace_and_dump(prefill_seq.get(), "qwen3_qnn_aot_sha_" + std::to_string(prefill_seq.get()) + ".mir");
   }
   if (trace_seq.get() == 0 || trace_seq.get() == 1) {
     trace_and_dump(1, "qwen3_qnn_aot_sha_1.mir");
@@ -110,8 +116,9 @@ MLLM_MAIN({
 
   mllm::print("SHA compilation completed successfully!");
   mllm::print("Output files:");
-  if (trace_seq.get() == 0 || trace_seq.get() == 32) {
-    mllm::print("  - qwen3_qnn_aot_sha_32.mir (IR dump for seq=32)");
+  if (trace_seq.get() == 0 || trace_seq.get() == prefill_seq.get()) {
+    mllm::print("  - qwen3_qnn_aot_sha_" + std::to_string(prefill_seq.get()) +
+                ".mir (IR dump for seq=" + std::to_string(prefill_seq.get()) + ")");
   }
   if (trace_seq.get() == 0 || trace_seq.get() == 1) {
     mllm::print("  - qwen3_qnn_aot_sha_1.mir (IR dump for seq=1)");
