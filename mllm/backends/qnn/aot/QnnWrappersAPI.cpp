@@ -53,7 +53,7 @@ int parseExperimentalFinalizePPoint(const char* name) {
   if (end == raw || *end != '\0' || !valid.contains(parsed)) {
     MLLM_ERROR_EXIT(
         ExitCode::kCoreError,
-        "{} must be a QAIRT 2.47 P point: "
+        "{} must be a validated QAIRT P point: "
         "0,1,2,3,4,5,6,8,13,15,16,17,19,20,21,22,23; got '{}'",
         name, raw);
   }
