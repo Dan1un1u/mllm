@@ -283,6 +283,18 @@ $(eval $(call build_objs,$(OTHER_OBJS),aarch64-android))
 $(eval $(call build_objs,$(OP_OBJS),aarch64-android))
 $(eval $(call build_objs,$(OP_OBJS_ASM_ANDROID),aarch64-android))
 
+# The QHPI translation unit includes the shared SIMD implementation directly.
+# The generated .d files are not consumed by this standalone Makefile, so keep
+# the incremental-build dependency explicit for every supported target.
+$(WORK)/x86_64-linux-clang/ops/VtcmMaskedSoftmaxQhpi.o \
+$(WORK)/hexagon-v68/ops/VtcmMaskedSoftmaxQhpi.o \
+$(WORK)/hexagon-v69/ops/VtcmMaskedSoftmaxQhpi.o \
+$(WORK)/hexagon-v73/ops/VtcmMaskedSoftmaxQhpi.o \
+$(WORK)/hexagon-v75/ops/VtcmMaskedSoftmaxQhpi.o \
+$(WORK)/hexagon-v79/ops/VtcmMaskedSoftmaxQhpi.o \
+$(WORK)/hexagon-v81/ops/VtcmMaskedSoftmaxQhpi.o \
+$(WORK)/aarch64-android/ops/VtcmMaskedSoftmaxQhpi.o: $(OP_SRC_DIR)/VtcmMaskedSoftmaxPlacement.cpp
+
 # x86
 $(WORK)/x86_64-linux-clang $(WORK)/hexagon-v68 $(WORK)/hexagon-v69 $(WORK)/hexagon-v73 $(WORK)/hexagon-v75 $(WORK)/hexagon-v79 $(WORK)/hexagon-v81 $(WORK)/aarch64-android:
 	@mkdir -p $@/ops
@@ -354,6 +366,12 @@ $(WORK)/hexagon-v75/$(LIBRARY_NAME): $(hexagon-v75_objs) | $(HFILES)
 #v79
 $(WORK)/hexagon-v79/%.o: $(SRC_DIR)/%.cpp | $(WORK)/hexagon-v79
 	$(HEXAGON_CXX_V79) $(HEXAGON_CXX_FLAGS_V79) -DTHIS_PKG_NAME=$(PACKAGE_NAME) -MMD -c $< -o $@
+
+# The causal Softmax is dominated by a compact HVX reduction/LUT loop.  Keep
+# the rest of the shared package at its established optimization level while
+# allowing the v79 compiler to unroll and schedule this kernel more aggressively.
+$(WORK)/hexagon-v79/ops/VtcmMaskedSoftmaxPlacement.o \
+$(WORK)/hexagon-v79/ops/VtcmMaskedSoftmaxQhpi.o: HEXAGON_CXX_FLAGS_V79 += -O3
 
 $(WORK)/hexagon-v79/ops/%.o: $(OP_SRC_DIR)/%.cpp | $(WORK)/hexagon-v79
 	$(HEXAGON_CXX_V79) $(HEXAGON_CXX_FLAGS_V79) -DTHIS_PKG_NAME=$(PACKAGE_NAME) -MMD $(INCLUDES) -c $< -o $@

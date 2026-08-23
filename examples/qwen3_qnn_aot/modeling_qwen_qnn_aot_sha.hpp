@@ -290,8 +290,9 @@ class Qwen3AttentionSHA final : public nn::Module {
     auto llm_embedding_sin = inputs[1];
     auto llm_embedding_cos = inputs[2];
     auto causal_mask = inputs[3];
-    const auto& past_key = inputs[4];    // [B, num_kv_heads, D, S]
-    const auto& past_value = inputs[5];  // [B, num_kv_heads, S, D]
+    auto position_ids = inputs[4];
+    const auto& past_key = inputs[5];    // [B, num_kv_heads, D, S]
+    const auto& past_value = inputs[6];  // [B, num_kv_heads, S, D]
 
     // [B, S, D] - shared QDQ for input to all Q/K/V projections
     hidden_states = ptq::QDQ(this, hidden_states, "q_proj_input_qdq");
@@ -417,9 +418,18 @@ class Qwen3AttentionSHA final : public nn::Module {
       auto attn = ptq::QDQ(this, nn::functional::matmul(q_h, kh), "qk_matmul_output_qdq_h" + h_str);
 
       // The opt-in marker is lowered to one fused custom masked Softmax.  The
-      // ordinary path remains byte-for-byte the accepted Qualcomm-native graph.
+      // causal specialization consumes the existing position IDs instead of
+      // rescanning the full [S, context] mask for every head.  For s32, expose
+      // the same 8x4 row tiling selected by Qualcomm's native Softmax so that
+      // QK -> Softmax -> PV can retain its Crouton layout.
       if (useVtcmMaskedE2Softmax()) {
-        attn = ptq::QDQ(this, attn + causal_mask, "softmax_output_qdq_h" + h_str);
+        const int32_t query_rows = attn.size(2);
+        auto causal_positions = position_ids.view({1, 1, query_rows, 1}, true);
+        if (query_rows == 32) {
+          attn = attn.view({1, 8, 4, attn.size(3)}, true);
+          causal_positions = causal_positions.view({1, 8, 4, 1}, true);
+        }
+        attn = ptq::QDQ(this, attn + causal_positions, "softmax_output_qdq_h" + h_str);
       } else {
         auto scale = Tensor::constant(scale_, kFloat32);
         scale = ptq::QDQ(this, scale, "scaling_qdq_h" + h_str);
@@ -437,6 +447,7 @@ class Qwen3AttentionSHA final : public nn::Module {
 
       // Output: attn @ V
       auto y_h = ptq::QDQ(this, nn::functional::matmul(attn, vh), "attn_value_matmul_output_qdq_h" + h_str);
+      if (y_h.size(1) == 8 && y_h.size(2) == 4) { y_h = y_h.view({1, 1, 32, head_dim_}, true); }
       attn_outputs.push_back(y_h);
     }
 
@@ -483,14 +494,15 @@ class Qwen3DecoderSHA final : public nn::Module {
     auto llm_embedding_sin = inputs[1];
     auto llm_embedding_cos = inputs[2];
     auto causal_mask = inputs[3];
-    auto past_key = inputs[4];
-    auto past_value = inputs[5];
+    auto position_ids = inputs[4];
+    auto past_key = inputs[5];
+    auto past_value = inputs[6];
 
     auto hidden_states = inputs[0];
     if (layer_idx_ != 0) { hidden_states = ptq::QDQ(this, hidden_states, "input_layernorm_input_qdq"); }
     auto residual = hidden_states;
     hidden_states = input_layer_norm_(hidden_states);
-    auto _ = self_attn_(hidden_states, llm_embedding_sin, llm_embedding_cos, causal_mask, past_key, past_value);
+    auto _ = self_attn_(hidden_states, llm_embedding_sin, llm_embedding_cos, causal_mask, position_ids, past_key, past_value);
     hidden_states = _[0];
     hidden_states = ptq::QDQ(this, residual + ptq::QDQ(this, hidden_states, "add_0_lhs_input_qdq"), "add_0_output_qdq");
     residual = hidden_states;
@@ -546,7 +558,7 @@ class Qwen3TextSHA final : public nn::Module {
     for (auto [index, block] : enumerate(blocks)) {
       auto pk = inputs[3 + index];
       auto pv = inputs[3 + index + num_hidden_layers_];
-      auto _ = block(x, llm_embedding_sin, llm_embedding_cos, causal_mask, pk, pv);
+      auto _ = block(x, llm_embedding_sin, llm_embedding_cos, causal_mask, position_ids, pk, pv);
       x = _[0];
       keys.push_back(_[1]);
       values.push_back(_[2]);

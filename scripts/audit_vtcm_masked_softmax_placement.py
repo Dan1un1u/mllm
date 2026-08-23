@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 
-OP_TYPE = "LLaMAPackage::VtcmMaskedE2SoftmaxHd128"
+DEFAULT_OP_TYPE = "LLaMAPackage::VtcmCausalE2SoftmaxHd128"
 
 
 def scalar(node: dict[str, Any], name: str) -> int:
@@ -20,10 +20,10 @@ def scalar(node: dict[str, Any], name: str) -> int:
     return int(next(iter(encoded.values())))
 
 
-def audit(path: Path, expected_count: int) -> dict[str, Any]:
+def audit(path: Path, expected_count: int, op_type: str) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     nodes: dict[str, dict[str, Any]] = payload["graph"]["nodes"]
-    custom = {node_id: node for node_id, node in nodes.items() if node.get("type") == OP_TYPE}
+    custom = {node_id: node for node_id, node in nodes.items() if node.get("type") == op_type}
     custom_outputs = set(custom)
     custom_inputs = {name for node in custom.values() for name in node.get("input_names", [])}
 
@@ -59,6 +59,37 @@ def audit(path: Path, expected_count: int) -> dict[str, Any]:
             "cycles_dominant",
         )
     }
+    metric_names = (
+        "mem_dram_read",
+        "mem_dram_write",
+        "mem_vtcm_read",
+        "mem_vtcm_write",
+        "cycles_duration",
+        "cycles_dominant",
+    )
+    profiled = {
+        node_id: node
+        for node_id, node in nodes.items()
+        if all(name in node.get("scalar_params", {}) for name in metric_names)
+    }
+    graph_totals = {
+        name: sum(scalar(node, name) for node in profiled.values()) for name in metric_names
+    }
+    type_totals: dict[str, dict[str, int]] = {}
+    for node in profiled.values():
+        node_type = node.get("type", "")
+        aggregate = type_totals.setdefault(
+            node_type, {"count": 0, "cycles_duration": 0, "cycles_dominant": 0}
+        )
+        aggregate["count"] += 1
+        aggregate["cycles_duration"] += scalar(node, "cycles_duration")
+        aggregate["cycles_dominant"] += scalar(node, "cycles_dominant")
+    top_types = [
+        {"type": op_type, **aggregate}
+        for op_type, aggregate in sorted(
+            type_totals.items(), key=lambda item: item[1]["cycles_duration"], reverse=True
+        )
+    ]
     consumer_types = sorted({consumer["type"] for items in consumers.values() for consumer in items})
     hvx_only = all("uses_hvx" in str(node["scalar_params"].get("op_flags", {})) for node in custom.values())
     every_output_consumed = all(consumers.values())
@@ -72,10 +103,13 @@ def audit(path: Path, expected_count: int) -> dict[str, Any]:
     )
     return {
         "input": str(path),
-        "op_type": OP_TYPE,
+        "op_type": op_type,
         "expected_count": expected_count,
         "observed_count": len(custom),
         "totals": totals,
+        "graph_profiled_node_count": len(profiled),
+        "graph_totals": graph_totals,
+        "top_types_by_cycles_duration": top_types[:12],
         "consumer_types": consumer_types,
         "every_output_consumed": every_output_consumed,
         "boundary_vtcm_conversions": boundary_conversions,
@@ -88,10 +122,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("htp_json", type=Path)
     parser.add_argument("--expected-count", type=int, default=16)
+    parser.add_argument("--op-type", default=DEFAULT_OP_TYPE)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
-    report = audit(args.htp_json, args.expected_count)
+    report = audit(args.htp_json, args.expected_count, args.op_type)
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

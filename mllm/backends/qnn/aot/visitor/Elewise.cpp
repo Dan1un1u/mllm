@@ -38,13 +38,28 @@ bool QnnAOTAddPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& op) {
   const char* placement_flag = std::getenv("MLLM_QNN_VTCM_MASKED_E2_SOFTMAX");
   const bool placement_enabled = placement_flag != nullptr && placement_flag[0] != '\0' && placement_flag[0] != '0';
   const auto& score_shape = i_0->tensor_.shape();
-  const auto& mask_shape = i_1->tensor_.shape();
-  // Only the experimental [B, 1, S, 1024] score+causal-mask marker may
-  // become the custom op. Every residual/RoPE/MLP Add stays Qualcomm-native.
-  const bool use_vtcm_softmax =
-      placement_enabled && score_shape == mask_shape && score_shape.size() == 4 && score_shape.back() == 1024;
-  auto qnn_op_node =
-      QnnAOTNodeOperation::create(use_vtcm_softmax ? "VtcmMaskedE2SoftmaxHd128" : "ElementWiseAdd");
+  const auto& position_shape = i_1->tensor_.shape();
+  const auto broadcast_compatible = [](const std::vector<int32_t>& lhs, const std::vector<int32_t>& rhs) {
+    if (lhs.size() != rhs.size()) { return false; }
+    for (size_t dim = 0; dim < lhs.size(); ++dim) {
+      if (lhs[dim] != rhs[dim] && lhs[dim] != 1 && rhs[dim] != 1) { return false; }
+    }
+    return true;
+  };
+  // Only the experimental [B, H, rows, K] score (K is a 32-lane prefix up
+  // to 1024) plus broadcastable
+  // [B, H, rows, 1] Int32 position marker may become the causal custom op.
+  // Every residual/RoPE/MLP Add stays Qualcomm-native.
+  const bool use_vtcm_softmax = placement_enabled && score_shape.size() == 4 && position_shape.size() == 4
+                                && score_shape.back() >= 32 && score_shape.back() <= 1024 && score_shape.back() % 32 == 0
+                                && position_shape.back() == 1 && i_1->tensor_.dtype() == kInt32
+                                && broadcast_compatible(score_shape, position_shape);
+  const char* multithreaded_flag = std::getenv("MLLM_QNN_VTCM_MASKED_E2_SOFTMAX_MT");
+  const bool use_multithreaded_kernel =
+      use_vtcm_softmax && multithreaded_flag != nullptr && multithreaded_flag[0] != '\0' && multithreaded_flag[0] != '0';
+  auto qnn_op_node = QnnAOTNodeOperation::create(use_multithreaded_kernel ? "VtcmCausalE2SoftmaxHd128Mt"
+                                                 : use_vtcm_softmax       ? "VtcmCausalE2SoftmaxHd128"
+                                                                          : "ElementWiseAdd");
   qnn_op_node->setPackageName(use_vtcm_softmax ? "LLaMAPackage" : "qti.aisw");
   qnn_op_node->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, i_0))
       ->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, i_1))

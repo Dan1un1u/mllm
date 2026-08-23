@@ -21,14 +21,15 @@
 
 DEFINE_UNIQ_TY()
 BEGIN_PKG_OPS_OPTS_LIST()
-DECLARE_PKG_OPS_OPTS_LIST(PKG_VtcmMaskedE2SoftmaxHd128)
+DECLARE_PKG_OPS_OPTS_LIST(PKG_VtcmCausalE2SoftmaxHd128)
 END_PKG_OPS_OPTS_LIST()
 
 namespace {
 
 constexpr auto kPackageName = THIS_PKG_NAME_STR;
-constexpr auto kOpName = "VtcmMaskedE2SoftmaxHd128";
-std::array<const char*, 1> op_names{{kOpName}};
+constexpr auto kOpName = "VtcmCausalE2SoftmaxHd128";
+constexpr auto kMtOpName = "VtcmCausalE2SoftmaxHd128Mt";
+std::array<const char*, 2> op_names{{kOpName, kMtOpName}};
 Qnn_ApiVersion_t sdk_api_version = QNN_HTP_API_VERSION_INIT;
 QnnOpPackage_Info_t package_info = QNN_OP_PACKAGE_INFO_INIT;
 QnnOpPackage_GlobalInfrastructure_t global_infrastructure = nullptr;
@@ -68,8 +69,8 @@ Qnn_ErrorHandle_t softmaxSimdPackageGetInfo(const QnnOpPackage_Info_t** info) {
 }
 
 Qnn_ErrorHandle_t softmaxSimdPackageValidateOpConfig(Qnn_OpConfig_t config) {
-  if (config.v1.packageName == nullptr || config.v1.typeName == nullptr
-      || std::string(kPackageName) != config.v1.packageName || std::string(kOpName) != config.v1.typeName
+  if (config.v1.packageName == nullptr || config.v1.typeName == nullptr || std::string(kPackageName) != config.v1.packageName
+      || (std::string(kOpName) != config.v1.typeName && std::string(kMtOpName) != config.v1.typeName)
       || config.v1.numOfParams != 0 || config.v1.numOfInputs != 2 || config.v1.numOfOutputs != 1) {
     return QNN_OP_PACKAGE_ERROR_VALIDATION_FAILURE;
   }

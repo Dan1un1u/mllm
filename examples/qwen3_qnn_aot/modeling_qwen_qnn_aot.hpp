@@ -245,8 +245,9 @@ class Qwen3Attention final : public nn::Module {
     auto llm_embedding_sin = inputs[1];
     auto llm_embedding_cos = inputs[2];
     auto causal_mask = inputs[3];
-    auto past_key = inputs[4];
-    auto past_value = inputs[5];
+    auto position_ids = inputs[4];
+    auto past_key = inputs[5];
+    auto past_value = inputs[6];
 
     // [B, S, D]
     hidden_states = ptq::QDQ(this, hidden_states, "q_proj_input_qdq");
@@ -309,10 +310,11 @@ class Qwen3Attention final : public nn::Module {
 
     // Keep the accepted graph unchanged unless the isolated custom-Softmax
     // experiment is explicitly enabled.  The marker Add is recognized by the
-    // QNN visitor as a fused masked Softmax and consumes the mask as a
-    // predicate rather than numerically adding its U8 sentinel.
+    // QNN visitor as a causal Softmax and consumes position IDs as compact
+    // valid-prefix metadata rather than numerically adding them.
     if (useVtcmMaskedE2Softmax()) {
-      attn = ptq::QDQ(this, attn + causal_mask, "softmax_output_qdq");
+      auto causal_positions = position_ids.view({1, 1, position_ids.size(0), 1}, true);
+      attn = ptq::QDQ(this, attn + causal_positions, "softmax_output_qdq");
     } else {
       auto scale = Tensor::constant(scale_, kFloat32);
       scale = ptq::QDQ(this, scale, "scaling_qdq");
@@ -359,14 +361,15 @@ class Qwen3Decoder final : public nn::Module {
     auto llm_embedding_sin = inputs[1];
     auto llm_embedding_cos = inputs[2];
     auto causal_mask = inputs[3];
-    auto past_key = inputs[4];
-    auto past_value = inputs[5];
+    auto position_ids = inputs[4];
+    auto past_key = inputs[5];
+    auto past_value = inputs[6];
 
     auto hidden_states = inputs[0];
     if (layer_idx_ != 0) { hidden_states = ptq::QDQ(this, hidden_states, "input_layernorm_input_qdq"); }
     auto residual = hidden_states;
     hidden_states = input_layer_norm_(hidden_states);
-    auto _ = self_attn_(hidden_states, llm_embedding_sin, llm_embedding_cos, causal_mask, past_key, past_value);
+    auto _ = self_attn_(hidden_states, llm_embedding_sin, llm_embedding_cos, causal_mask, position_ids, past_key, past_value);
     hidden_states = _[0];
     hidden_states = ptq::QDQ(this, residual + ptq::QDQ(this, hidden_states, "add_0_lhs_input_qdq"), "add_0_output_qdq");
     residual = hidden_states;
@@ -422,7 +425,7 @@ class Qwen3Text final : public nn::Module {
     for (auto [index, block] : enumerate(blocks)) {
       auto pk = inputs[3 + index];
       auto pv = inputs[3 + index + num_hidden_layers_];
-      auto _ = block(x, llm_embedding_sin, llm_embedding_cos, causal_mask, pk, pv);
+      auto _ = block(x, llm_embedding_sin, llm_embedding_cos, causal_mask, position_ids, pk, pv);
       x = _[0];
       keys.push_back(_[1]);
       values.push_back(_[2]);
