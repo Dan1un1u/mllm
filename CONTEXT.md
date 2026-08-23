@@ -100,6 +100,10 @@ _Avoid_: Build cache, staging directory, unverified copy
 A native-U8 RMSNorm baseline rebuilt and run entirely with one pinned QAIRT release while preserving the source model and logical quantization contract. Its compiler schedule belongs to that release and must be validated again rather than inherited by name from another QAIRT version.
 _Avoid_: In-place SDK upgrade, version-only relabel, assumed cross-version schedule
 
+**Selected A8 baseline**:
+The single project-designated A8 reference from which later optimization experiments branch and against which they report results. “Best” means the selected aggregate workload trade-off among completed candidates, not guaranteed dominance in every workload or an exhaustive global optimum.
+_Avoid_: Fastest in every workload, globally optimal schedule, interchangeable A8 candidate
+
 ## Clean-room implementation status
 
 The native-U8 RMSNorm experiment is implemented as a clean-room derivative of

@@ -9,9 +9,10 @@ QAIRT: `2.49.0.260730` / QNN API `2.38.0`
 ## Decision
 
 The native-U8 RMSNorm W4A8G32 baseline is successfully migrated to the
-isolated QAIRT 2.49 environment. The migrated baseline uses graph-finalize
-`O=3, P=19` for both s1 and s32. The QAIRT-default context is retained only as
-an audit/control artifact because it is slower in both workloads.
+isolated QAIRT 2.49 environment. The migrated `O=3, P=19` context is promoted
+to the selected A8 baseline for subsequent work. The QAIRT-default context is
+retained only as an audit/control artifact because it is slower in both
+workloads.
 
 No model or quantization recipe changed during the migration. The accepted
 QAIRT 2.47 `.mllm` source, W4G32 weights, asymmetric-U8 activation encodings,
@@ -114,6 +115,12 @@ P19 is selected because, within QAIRT 2.49, it improves the migrated default
 by 4.22% in prefill and 9.20% in decode. This validates P19 for the migrated
 baseline; it does not claim that point numbers have identical internal meaning
 across QAIRT releases or that an exhaustive 2.49 P-point search was performed.
+
+The baseline promotion is an explicit aggregate-workload decision: compared
+with the formal 2.47 P19 result, 2.49 P19 trades 1.74% prefill throughput for
+8.71% decode throughput. “Selected A8 baseline” therefore means the canonical
+parent and comparison target for future experiments, not Pareto dominance in
+both phases.
 
 ## Published evidence
 
