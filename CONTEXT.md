@@ -95,3 +95,15 @@ _Avoid_: decode optimization
 Performance work evaluated on autoregressive token generation after the first
 token.
 _Avoid_: prefill optimization
+
+**GQA Group**:
+The smallest fair Attention comparison unit: all query heads that share one
+key/value head and the associated data preparation for that shared head.
+_Avoid_: single query head, full Attention layer
+
+**Fused GQA Core**:
+The candidate Attention subgraph that consumes one GQA Group after positional
+processing and cache assembly, performs score computation, scaling, masking,
+normalization, and value aggregation within one fusion boundary, and produces
+that group's Attention outputs.
+_Avoid_: fused Softmax, full Attention layer, QKV projection
