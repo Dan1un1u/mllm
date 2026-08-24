@@ -787,13 +787,24 @@ bool LLMQuantRecipeEqualPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_
         case kInt16:
         case kFloat32: {
           // ElementWiseEqual requires both operands to use the same physical
-          // datatype. Reuse the activation encoding instead of forcing A16.
+          // datatype.  Preserve the accepted W4A16 constant-materialization
+          // path exactly: changing the U16 constant to the input attr before
+          // PTQ leaves the manifest unchanged but changes the static payload
+          // emitted into the QNN context.  Only the native-A8 graph needs the
+          // new input-encoding path.
           auto input_spec = i_0->getAttr("quant_recipe")->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>();
           auto source_spec = std::static_pointer_cast<ir::linalg::QuantizationSpecAsymPerTensor>(input_spec->spec_);
-          auto constant_tensor = i_1->cast_<ir::tensor::TensorValue>();
-          const auto target_dtype = source_spec->quant_to_type == kUInt8 ? kUInt8PerTensorAsy : kUInt16PerTensorAsy;
-          constant_tensor->tensor_ = constant_tensor->tensor_.__unsafeSetDType(target_dtype);
-          i_1->setAttr("quant_recipe", input_spec);
+          if (source_spec->quant_to_type == kUInt8) {
+            auto constant_tensor = i_1->cast_<ir::tensor::TensorValue>();
+            constant_tensor->tensor_ = constant_tensor->tensor_.__unsafeSetDType(kUInt8PerTensorAsy);
+            i_1->setAttr("quant_recipe", input_spec);
+          } else {
+            MLLM_RETURN_FALSE_IF_NOT(source_spec->quant_to_type == kUInt16);
+            i_1->setAttr(
+                "quant_recipe",
+                writer.create<ir::linalg::LinalgIRQuantizatonSpecAttr>(ir::linalg::QuantizationSpecAsymPerTensor::create(
+                    0, 65535, kUInt16, kFloat32, kInt32, Tensor::nil(), Tensor::nil())));
+          }
           break;
         }
         default: {
