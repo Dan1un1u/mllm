@@ -22,7 +22,8 @@ _Avoid_: archived reference, baseline
 
 **Selected Baseline**:
 The user-approved implementation that currently represents the project outcome
-and is registered in Project Memory.
+and is registered in Project Memory. Selection does not by itself imply that
+the implementation is usable for model-quality or accuracy claims.
 _Avoid_: candidate, local pass, best branch
 
 **Candidate**:

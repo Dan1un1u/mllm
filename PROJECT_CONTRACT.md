@@ -66,6 +66,14 @@ approval and a committed contract amendment.
 - **PC-020 — Compiler-only correctness.** A compiler scheduling change must
   preserve the declared upper-layer numerical contract before its performance
   result is accepted.
+- **PC-031 — Current W4A8 accuracy scope.** The Selected W4A8 Baseline is not
+  currently usable for model-quality claims; its recorded full-model sanity is
+  `0/100`. Investigation of accumulated full-model quantization error is
+  deferred while the active research scope prioritizes A8 execution speed.
+  Full-model accuracy is informational unless an approved Experiment declares
+  otherwise. Every changed local computation must still pass its declared
+  mathematical and numerical correctness check, using the W4A16 comparator as
+  the accuracy reference when specified.
 
 ## Governance
 
