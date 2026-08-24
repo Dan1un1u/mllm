@@ -1,326 +1,405 @@
 schema_version: 1
 project: mllm-w4a8g32
 allowed_values:
-  execution_state: [proposed, approved, running, completed, aborted]
-  evidence_validity: [not_checked, valid, invalid, inconclusive]
-  local_gate: [not_run, pass, fail, not_applicable]
-  adoption_status: [pending, accepted, rejected, superseded, not_applicable]
+  execution_state:
+  - proposed
+  - approved
+  - running
+  - completed
+  - aborted
+  evidence_validity:
+  - not_checked
+  - valid
+  - invalid
+  - inconclusive
+  local_gate:
+  - not_run
+  - pass
+  - fail
+  - not_applicable
+  adoption_status:
+  - pending
+  - accepted
+  - rejected
+  - superseded
+  - not_applicable
 experiments:
-  - id: EXP-0001
-    slug: clean-room-w4a8-baseline
-    title: Clean-room W4A8G32 experimental baseline
-    parent: null
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: pass
-    adoption_status: superseded
-    evidence_profile: full-model-performance
-    source_branches: [codex/w4a8g32-experimental-baseline]
-    source_commits: [b7582792, 187967826b0a]
-    record: docs/experiments/EXP-0001.md
-    reopen_condition: not_applicable
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0002
-    slug: native-u8-rmsnorm
-    title: Native U8 RMSNorm
-    parent: null
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: pass
-    adoption_status: superseded
-    evidence_profile: full-model-performance
-    source_branches: [codex/w4a8g32-native-u8-rmsnorm]
-    source_commits: [d47f8f46, 987a71562bb8]
-    record: docs/experiments/EXP-0002.md
-    reopen_condition: not_applicable
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0003
-    slug: lpbq-fc-matmul-mlp
-    title: LPBQ FullyConnected and MatMul MLP lowering
-    parent: null
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: fail
-    adoption_status: rejected
-    evidence_profile: micrograph-performance
-    source_branches:
-      - codex/w4a8g32-lpbq-fc-matmul-mlp
-      - codex/w4a8g32-lpbq-qairt249-micrograph
-    source_commits: [274c2f5a3f68, fd0d5dc1569f]
-    record: docs/experiments/EXP-0003.md
-    reopen_condition: never_under_current_contract
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0004
-    slug: mlp-microcontrols
-    title: MLP down zero-bias and gate/up output-channel split controls
-    parent: null
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: fail
-    adoption_status: rejected
-    evidence_profile: micrograph-performance
-    source_branches:
-      - codex/w4a8g32-lpbq-down-s32-zero-bias
-      - codex/w4a8g32-lpbq-gateup-s1-oc-split
-    source_commits: [fca682e7309e, d8e959a4ae3d]
-    record: docs/experiments/EXP-0004.md
-    reopen_condition: never_under_current_contract
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0005
-    slug: w8a8-vs-lpbq-layer14-mlp
-    title: Layer 14 per-tensor W8A8 versus LPBQ W4A8 diagnostic
-    parent: null
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: not_applicable
-    adoption_status: not_applicable
-    evidence_profile: diagnostic
-    source_branches: [codex/w4a8g32-w8a8-vs-lpbq-layer14-mlp]
-    source_commits: [f61609980101]
-    record: docs/experiments/EXP-0005.md
-    reopen_condition: not_applicable
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0006
-    slug: lpbq-a16-vs-a8-projections
-    title: Strict LPBQ W4 activation A16 versus A8 projection diagnostic
-    parent: null
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: not_applicable
-    adoption_status: not_applicable
-    evidence_profile: diagnostic
-    source_branches: [codex/w4a8g32-lpbq-a16-vs-a8-projections]
-    source_commits: [f223226c68b4]
-    record: docs/experiments/EXP-0006.md
-    reopen_condition: not_applicable
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0007
-    slug: p-point-fairness
-    title: Fair W4A16 and W4A8 compiler schedule search
-    parent: null
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: pass
-    adoption_status: accepted
-    evidence_profile: full-model-performance
-    source_branches: [codex/w4a8g32-lpbq-p-point-search]
-    source_commits: [97ba0bbbb1a0, 462c9207]
-    record: docs/experiments/EXP-0007.md
-    reopen_condition: not_applicable
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0008
-    slug: qairt249-native-u8-rmsnorm-baseline
-    title: QAIRT 2.49 native U8 RMSNorm baseline migration
-    parent: null
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: pass
-    adoption_status: accepted
-    evidence_profile: full-model-performance
-    source_branches: [codex/w4a8g32-rmsnorm-u8-qairt249]
-    source_commits: [a8a3dcd26f18, 067bcea464d4]
-    record: docs/experiments/EXP-0008.md
-    reopen_condition: not_applicable
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0009
-    slug: softmax-optimization
-    title: Custom U8 Softmax optimization family
-    parent: null
-    variants: [EXP-0009-A, EXP-0009-B, EXP-0009-C, EXP-0009-D, EXP-0009-E]
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: fail
-    adoption_status: rejected
-    evidence_profile: full-model-performance
-    source_branches:
-      - codex/w4a8g32-vtcm-u8-masked-softmax
-      - codex/w4a8g32-native-u8-softmax-qairt249
-      - codex/w4a8g32-vtcm-u8-softmax-simd-qairt249
-      - codex/w4a8g32-vtcm-causal-softmax-qairt249
-    source_commits: [d4472496, c23a9d73, 0fa7b28a, a49d078f, 96a33e50, f9f4bbeb]
-    record: docs/experiments/EXP-0009.md
-    supplemental_references:
-      - kind: codex_thread
-        id: 01a03274-4d35-7751-b270-d9a232be60cf
-        title: Custom Softmax negative experiment archive
-        authority: non_authoritative
-    reopen_condition: never_under_current_contract
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0009-A
-    slug: softmax-vtcm-placement
-    title: TCM-only custom Softmax placement proof
-    parent: EXP-0009
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: pass
-    adoption_status: not_applicable
-    evidence_profile: micrograph-performance
-    source_branches: [codex/w4a8g32-vtcm-u8-masked-softmax]
-    source_commits: [d4472496]
-    record: docs/experiments/EXP-0009.md
-    reopen_condition: not_applicable
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0009-B
-    slug: zero-dram-e2softmax
-    title: Zero-DRAM U8 masked E2Softmax
-    parent: EXP-0009
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: fail
-    adoption_status: rejected
-    evidence_profile: full-model-performance
-    source_branches: [codex/w4a8g32-vtcm-u8-masked-softmax]
-    source_commits: [c23a9d73, 0fa7b28a]
-    record: docs/experiments/EXP-0009.md
-    reopen_condition: never_under_current_contract
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0009-C
-    slug: native-u8-softmax-qairt249
-    title: Isolated native U8 Softmax QAIRT 2.49 study
-    parent: EXP-0009
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: not_applicable
-    adoption_status: not_applicable
-    evidence_profile: diagnostic
-    source_branches: [codex/w4a8g32-native-u8-softmax-qairt249]
-    source_commits: [582074f1, a49d078f]
-    record: docs/experiments/EXP-0009.md
-    reopen_condition: not_applicable
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0009-D
-    slug: hvx-simd-scale-fused-softmax
-    title: HVX SIMD and scale-fused custom Softmax
-    parent: EXP-0009
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: fail
-    adoption_status: rejected
-    evidence_profile: full-model-performance
-    source_branches: [codex/w4a8g32-vtcm-u8-softmax-simd-qairt249]
-    source_commits: [96a33e50]
-    record: docs/experiments/EXP-0009.md
-    reopen_condition: never_under_current_contract
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0009-E
-    slug: causal-packed-qhpi-softmax
-    title: Causal prefix, head packing, and QHPI Softmax
-    parent: EXP-0009
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: fail
-    adoption_status: rejected
-    evidence_profile: micrograph-performance
-    source_branches: [codex/w4a8g32-vtcm-causal-softmax-qairt249]
-    source_commits: [f9f4bbeb]
-    record: docs/experiments/EXP-0009.md
-    reopen_condition: never_under_current_contract
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0010
-    slug: compact-attention-prefill
-    title: Compact attention and compact initial prefill
-    parent: null
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: fail
-    adoption_status: rejected
-    evidence_profile: full-model-performance
-    source_branches: [codex/w4a8g32-prefill-compact-attention-qairt249]
-    source_commits: [b300a9d64ef2]
-    record: docs/experiments/EXP-0010.md
-    reopen_condition: production_graph_io_contract_changes
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0011
-    slug: output-pruning
-    title: Last-token-only logits and cache-only intermediate outputs
-    parent: null
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: fail
-    adoption_status: rejected
-    evidence_profile: full-model-performance
-    source_branches: [codex/w4a8g32-prefill-compact-attention-qairt249]
-    source_commits: [b300a9d64ef2]
-    record: docs/experiments/EXP-0011.md
-    reopen_condition: official_runner_or_api_output_contract_changes
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0012
-    slug: kv-head-packing-p-schedule
-    title: K/V head packing and projection schedule
-    parent: null
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: fail
-    adoption_status: rejected
-    evidence_profile: micrograph-performance
-    source_branches: [codex/w4a8g32-kv-head-packing]
-    source_commits: [978ab2bb09dc]
-    record: docs/experiments/EXP-0012.md
-    reopen_condition: verified_fused_qk_av_lowering_or_kv_layout_change
-    decided_by: user
-    decided_on: '2026-08-24'
-
-  - id: EXP-0013
-    slug: w4a16-current-source-regression
-    title: W4A16 current-source compatibility regression
-    parent: null
-    variants: []
-    execution_state: completed
-    evidence_validity: valid
-    local_gate: not_applicable
-    adoption_status: not_applicable
-    evidence_profile: correctness-only
-    source_branches: [codex/w4a16g32-repro-baseline]
-    source_commits: [462c9207]
-    record: docs/experiments/EXP-0013.md
-    reopen_condition: not_applicable
-    decided_by: user
-    decided_on: '2026-08-24'
+- id: EXP-0001
+  slug: clean-room-w4a8-baseline
+  title: Clean-room W4A8G32 experimental baseline
+  parent: null
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: pass
+  adoption_status: superseded
+  evidence_profile: full-model-performance
+  source_branches:
+  - codex/w4a8g32-experimental-baseline
+  source_commits:
+  - b7582792
+  - 187967826b0a
+  record: docs/experiments/EXP-0001.md
+  reopen_condition: not_applicable
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0002
+  slug: native-u8-rmsnorm
+  title: Native U8 RMSNorm
+  parent: null
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: pass
+  adoption_status: superseded
+  evidence_profile: full-model-performance
+  source_branches:
+  - codex/w4a8g32-native-u8-rmsnorm
+  source_commits:
+  - d47f8f46
+  - 987a71562bb8
+  record: docs/experiments/EXP-0002.md
+  reopen_condition: not_applicable
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0003
+  slug: lpbq-fc-matmul-mlp
+  title: LPBQ FullyConnected and MatMul MLP lowering
+  parent: null
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: fail
+  adoption_status: rejected
+  evidence_profile: micrograph-performance
+  source_branches:
+  - codex/w4a8g32-lpbq-fc-matmul-mlp
+  - codex/w4a8g32-lpbq-qairt249-micrograph
+  source_commits:
+  - 274c2f5a3f68
+  - fd0d5dc1569f
+  record: docs/experiments/EXP-0003.md
+  reopen_condition: never_under_current_contract
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0004
+  slug: mlp-microcontrols
+  title: MLP down zero-bias and gate/up output-channel split controls
+  parent: null
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: fail
+  adoption_status: rejected
+  evidence_profile: micrograph-performance
+  source_branches:
+  - codex/w4a8g32-lpbq-down-s32-zero-bias
+  - codex/w4a8g32-lpbq-gateup-s1-oc-split
+  source_commits:
+  - fca682e7309e
+  - d8e959a4ae3d
+  record: docs/experiments/EXP-0004.md
+  reopen_condition: never_under_current_contract
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0005
+  slug: w8a8-vs-lpbq-layer14-mlp
+  title: Layer 14 per-tensor W8A8 versus LPBQ W4A8 diagnostic
+  parent: null
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: not_applicable
+  adoption_status: not_applicable
+  evidence_profile: diagnostic
+  source_branches:
+  - codex/w4a8g32-w8a8-vs-lpbq-layer14-mlp
+  source_commits:
+  - f61609980101
+  record: docs/experiments/EXP-0005.md
+  reopen_condition: not_applicable
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0006
+  slug: lpbq-a16-vs-a8-projections
+  title: Strict LPBQ W4 activation A16 versus A8 projection diagnostic
+  parent: null
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: not_applicable
+  adoption_status: not_applicable
+  evidence_profile: diagnostic
+  source_branches:
+  - codex/w4a8g32-lpbq-a16-vs-a8-projections
+  source_commits:
+  - f223226c68b4
+  record: docs/experiments/EXP-0006.md
+  reopen_condition: not_applicable
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0007
+  slug: p-point-fairness
+  title: Fair W4A16 and W4A8 compiler schedule search
+  parent: null
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: pass
+  adoption_status: accepted
+  evidence_profile: full-model-performance
+  source_branches:
+  - codex/w4a8g32-lpbq-p-point-search
+  source_commits:
+  - 97ba0bbbb1a0
+  - 462c9207
+  record: docs/experiments/EXP-0007.md
+  reopen_condition: not_applicable
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0008
+  slug: qairt249-native-u8-rmsnorm-baseline
+  title: QAIRT 2.49 native U8 RMSNorm baseline migration
+  parent: null
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: pass
+  adoption_status: accepted
+  evidence_profile: full-model-performance
+  source_branches:
+  - codex/w4a8g32-rmsnorm-u8-qairt249
+  source_commits:
+  - a8a3dcd26f18
+  - 067bcea464d4
+  record: docs/experiments/EXP-0008.md
+  reopen_condition: not_applicable
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0009
+  slug: softmax-optimization
+  title: Custom U8 Softmax optimization family
+  parent: null
+  variants:
+  - EXP-0009-A
+  - EXP-0009-B
+  - EXP-0009-C
+  - EXP-0009-D
+  - EXP-0009-E
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: fail
+  adoption_status: rejected
+  evidence_profile: full-model-performance
+  source_branches:
+  - codex/w4a8g32-vtcm-u8-masked-softmax
+  - codex/w4a8g32-native-u8-softmax-qairt249
+  - codex/w4a8g32-vtcm-u8-softmax-simd-qairt249
+  - codex/w4a8g32-vtcm-causal-softmax-qairt249
+  source_commits:
+  - d4472496
+  - c23a9d73
+  - 0fa7b28a
+  - a49d078f
+  - 96a33e50
+  - f9f4bbeb
+  record: docs/experiments/EXP-0009.md
+  supplemental_references:
+  - kind: codex_thread
+    id: 01a03274-4d35-7751-b270-d9a232be60cf
+    title: Custom Softmax negative experiment archive
+    authority: non_authoritative
+  reopen_condition: never_under_current_contract
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0009-A
+  slug: softmax-vtcm-placement
+  title: TCM-only custom Softmax placement proof
+  parent: EXP-0009
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: pass
+  adoption_status: not_applicable
+  evidence_profile: micrograph-performance
+  source_branches:
+  - codex/w4a8g32-vtcm-u8-masked-softmax
+  source_commits:
+  - d4472496
+  record: docs/experiments/EXP-0009.md
+  reopen_condition: not_applicable
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0009-B
+  slug: zero-dram-e2softmax
+  title: Zero-DRAM U8 masked E2Softmax
+  parent: EXP-0009
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: fail
+  adoption_status: rejected
+  evidence_profile: full-model-performance
+  source_branches:
+  - codex/w4a8g32-vtcm-u8-masked-softmax
+  source_commits:
+  - c23a9d73
+  - 0fa7b28a
+  record: docs/experiments/EXP-0009.md
+  reopen_condition: never_under_current_contract
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0009-C
+  slug: native-u8-softmax-qairt249
+  title: Isolated native U8 Softmax QAIRT 2.49 study
+  parent: EXP-0009
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: not_applicable
+  adoption_status: not_applicable
+  evidence_profile: diagnostic
+  source_branches:
+  - codex/w4a8g32-native-u8-softmax-qairt249
+  source_commits:
+  - 582074f1
+  - a49d078f
+  record: docs/experiments/EXP-0009.md
+  reopen_condition: not_applicable
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0009-D
+  slug: hvx-simd-scale-fused-softmax
+  title: HVX SIMD and scale-fused custom Softmax
+  parent: EXP-0009
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: fail
+  adoption_status: rejected
+  evidence_profile: full-model-performance
+  source_branches:
+  - codex/w4a8g32-vtcm-u8-softmax-simd-qairt249
+  source_commits:
+  - 96a33e50
+  record: docs/experiments/EXP-0009.md
+  reopen_condition: never_under_current_contract
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0009-E
+  slug: causal-packed-qhpi-softmax
+  title: Causal prefix, head packing, and QHPI Softmax
+  parent: EXP-0009
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: fail
+  adoption_status: rejected
+  evidence_profile: micrograph-performance
+  source_branches:
+  - codex/w4a8g32-vtcm-causal-softmax-qairt249
+  source_commits:
+  - f9f4bbeb
+  record: docs/experiments/EXP-0009.md
+  reopen_condition: never_under_current_contract
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0010
+  slug: compact-attention-prefill
+  title: Compact attention and compact initial prefill
+  parent: null
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: fail
+  adoption_status: rejected
+  evidence_profile: full-model-performance
+  source_branches:
+  - codex/w4a8g32-prefill-compact-attention-qairt249
+  source_commits:
+  - b300a9d64ef2
+  record: docs/experiments/EXP-0010.md
+  reopen_condition: production_graph_io_contract_changes
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0011
+  slug: output-pruning
+  title: Last-token-only logits and cache-only intermediate outputs
+  parent: null
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: fail
+  adoption_status: rejected
+  evidence_profile: full-model-performance
+  source_branches:
+  - codex/w4a8g32-prefill-compact-attention-qairt249
+  source_commits:
+  - b300a9d64ef2
+  record: docs/experiments/EXP-0011.md
+  reopen_condition: official_runner_or_api_output_contract_changes
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0012
+  slug: kv-head-packing-p-schedule
+  title: K/V head packing and projection schedule
+  parent: null
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: fail
+  adoption_status: rejected
+  evidence_profile: micrograph-performance
+  source_branches:
+  - codex/w4a8g32-kv-head-packing
+  source_commits:
+  - 978ab2bb09dc
+  record: docs/experiments/EXP-0012.md
+  reopen_condition: verified_fused_qk_av_lowering_or_kv_layout_change
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0013
+  slug: w4a16-current-source-regression
+  title: W4A16 current-source compatibility regression
+  parent: null
+  variants: []
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: not_applicable
+  adoption_status: not_applicable
+  evidence_profile: correctness-only
+  source_branches:
+  - codex/w4a16g32-repro-baseline
+  source_commits:
+  - 462c9207
+  record: docs/experiments/EXP-0013.md
+  reopen_condition: not_applicable
+  decided_by: user
+  decided_on: '2026-08-24'
+- id: EXP-0014
+  slug: qhpi-u8-hmx-feasibility
+  title: QHPI in-graph U8xS8 HMX feasibility gate
+  parent: null
+  variants: []
+  execution_state: proposed
+  evidence_validity: not_checked
+  local_gate: not_run
+  adoption_status: pending
+  evidence_profile: micrograph-performance
+  source_branches:
+  - codex/exp-0014-qhpi-u8-hmx-feasibility
+  source_commits: []
+  record: docs/experiments/EXP-0014.md
+  distinct_from:
+  - EXP-0009
+  - EXP-0010
+  - EXP-0012
+  hard_gate: The micrograph must compile and execute on PJZ110/V79 in one QNN graph;
+    the QHPI descriptor must request HMX and TCM-only internal placement; the custom
+    operator must have zero operator-attributed DDR read/write and no spill/fill or
+    CPU fallback; Optrace must identify its execution; and requantized U8 output must
+    match the independent asymmetric integer reference exactly or within a predeclared
+    one-LSB tolerance. Any failure stops before fused attention.
+  reopen_condition: not_applicable
+  decided_by: pending
+  decided_on: '2026-08-24'
