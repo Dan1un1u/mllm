@@ -97,7 +97,13 @@ bool QnnAOTRMSNormPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& op)
   // Fake bias quant recipe
   auto bias_scale = Tensor::ones({1}, kFloat32);
   auto bias_zero_point = Tensor::zeros({1}, kInt32);
-  bias_scale.at<float>({0}) = weight_quant_spec->scale.item<float>();
+  // QNN's U16 RmsNorm path requires the synthetic bias encoding to follow
+  // the output encoding.  The integer bias is zero either way, but using the
+  // gamma scale here corrupts the compiled W4A16 graph on HTP.  Preserve the
+  // accepted legacy U16 contract while retaining the native-U8 experiment's
+  // U8 gamma/bias encoding.
+  bias_scale.at<float>({0}) = gamma_is_u8 ? weight_quant_spec->scale.item<float>()
+                                         : output_quant_spec->scale.item<float>();
   MLLM_RT_ASSERT_EQ(bias_zero_point.item<mllm_int32_t>(), 0);
   auto quant_spec = mllm::ir::linalg::QuantizationSpecAsymPerTensor::create(
       0, parameter_quant_max, parameter_dtype, kFloat32, kInt32, bias_scale, bias_zero_point);

@@ -100,11 +100,9 @@ for graph in s1 s32; do
     echo "missing ${graph} manifest or schematic" >&2
     exit 1
   }
-  python3 "${repo_root}/scripts/qnn_w4a16_manifest_regression.py" \
+  python3 "${repo_root}/scripts/qnn_quant_manifest_equivalent.py" \
     "${reference_root}/manifests/model.0.${graph}_quant_manifest.json" \
-    "${manifest}" \
-    --output "${manifest_dir}/model.0.${graph}_reference-equivalence.json" \
-    >"${manifest_dir}/model.0.${graph}_reference-equivalence.log"
+    "${manifest}" >"${manifest_dir}/model.0.${graph}_reference-equivalence.txt"
 done
 
 publish="${publish_root}.tmp.$$"
@@ -135,7 +133,7 @@ aot_config=${aot_config}
 aot_config_sha256=$(sha256sum "${aot_config}" | awk '{print $1}')
 graph_contract=legacy full-width s1/s32 W4A16G32
 reference_result=${reference_result}
-reference_manifests=canonical-equivalent after isolating exact-zero synthetic RmsNorm bias scale metadata
+reference_manifests=canonical-equivalent with no excluded fields
 EOF
 
 cat >"${publish}/profile-contract.env" <<EOF

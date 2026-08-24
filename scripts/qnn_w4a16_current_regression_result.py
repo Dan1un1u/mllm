@@ -93,7 +93,7 @@ def main() -> None:
     manifest_equivalence = all(
         (Path("/mnt/d/llm_exp/models/qwen3_sm8750_v79/g32/"
               "w4a16_current_regression_qairt249/20260824/manifests")
-         / f"model.0.{graph}_reference-equivalence.json").is_file()
+         / f"model.0.{graph}_reference-equivalence.txt").is_file()
         for graph in ("s1", "s32")
     )
     compact_byte_exact = compact_full_sha == compact_cropped_sha
@@ -126,7 +126,7 @@ def main() -> None:
             "speed": speed,
         },
         "graph_contract": {
-            "reference_manifest_canonical_equivalence_except_exact_zero_bias_scale": manifest_equivalence,
+            "reference_manifest_canonical_equivalence": manifest_equivalence,
             "graphs": ["model.0.s1", "model.0.s32"],
         },
         "compact_prefill_math": {
