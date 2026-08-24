@@ -381,7 +381,7 @@ experiments:
   title: QHPI in-graph U8xS8 HMX feasibility gate
   parent: null
   variants: []
-  execution_state: approved
+  execution_state: running
   evidence_validity: not_checked
   local_gate: not_run
   adoption_status: pending
@@ -404,3 +404,7 @@ experiments:
   decided_by: user
   decided_on: '2026-08-24'
   approval_ref: 'User message 2026-08-24: 同意。尝试一下这个路线'
+  runtime:
+    source_worktree: /home/daniuniu/work/mllm-w4a8
+    source_branch: codex/exp-0014-qhpi-u8-hmx-feasibility
+    started_on: '2026-08-24'
