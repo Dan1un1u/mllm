@@ -500,6 +500,7 @@ acceptance_args=()
 if [[ "${RMSNORM_U8_CONTRACT}" == "1" ]]; then
     acceptance_args+=(--rmsnorm-u8)
 fi
+set +e
 python3 "${REPO_ROOT}/scripts/qnn_w4a8_acceptance.py" \
     --s1-manifest "${MANIFEST_DIR}/model.0.s1_quant_manifest.json" \
     --s1-trace "${RESULT_ROOT}/qwen3-sm8750-v79-g32-s1-chrometrace.json" \
@@ -510,6 +511,14 @@ python3 "${REPO_ROOT}/scripts/qnn_w4a8_acceptance.py" \
     --output "${RESULT_ROOT}/qwen3-sm8750-v79-g32-w4a8-acceptance.json" \
     "${acceptance_args[@]}" \
     | tee "${RESULT_ROOT}/w4a8-acceptance.log"
+acceptance_status="${PIPESTATUS[0]}"
+set -e
+if [[ "${RMSNORM_U8_CONTRACT}" == "1" ]]; then
+    [[ "${acceptance_status}" == "0" ]] \
+        || die "W4A8 acceptance failed with status ${acceptance_status}"
+elif [[ "${acceptance_status}" != "0" ]]; then
+    echo "W4A16 control: W4A8 acceptance failure is expected and informational"
+fi
 
 echo "===== Throughput summary and canonical report ====="
 benchmark_csv=("${RESULT_ROOT}"/benchmark/run_*/qnn_runner_e2e.csv)
