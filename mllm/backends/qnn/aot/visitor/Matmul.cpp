@@ -1,6 +1,8 @@
 // Copyright (c) MLLM Team.
 // Licensed under the MIT License.
 
+#include <cstdlib>
+
 #include "mllm/utils/Common.hpp"
 #include "mllm/compile/ir/linalg/Op.hpp"
 #include "mllm/compile/ir/builtin/Attribute.hpp"
@@ -35,9 +37,12 @@ bool QnnAOTMatMulPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& op) 
   // Output
   auto output = op->outputs().front()->cast_<ir::tensor::TensorValue>();
 
-  // Create QNN MatMul Op
-  auto qnn_op_node = QnnAOTNodeOperation::create("MatMul");
-  qnn_op_node->setPackageName("qti.aisw");
+  // EXP-0014 replaces MatMul only when the dedicated micrograph compiler
+  // explicitly opts in. Normal model compilation remains on qti.aisw::MatMul.
+  const char* hmx_probe = std::getenv("MLLM_QNN_QHPI_U8S8_HMX_PROBE");
+  const bool use_hmx_probe = hmx_probe != nullptr && hmx_probe[0] != '\0' && hmx_probe[0] != '0';
+  auto qnn_op_node = QnnAOTNodeOperation::create(use_hmx_probe ? "U8S8HmxMatMul" : "MatMul");
+  qnn_op_node->setPackageName(use_hmx_probe ? "QhpiHmxProbePackage" : "qti.aisw");
 
   qnn_op_node->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, input0))
       ->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, input1))

@@ -405,9 +405,16 @@ Qnn_QuantizeParams_t QnnAOTNodeTensor::parseQnnQuantizeParamFromIR(const ir::ten
         MLLM_ERROR_EXIT(ExitCode::kCoreError, "SymPerTensor quant recipe has no scale. tensor: {}", v->name());
       }
 
-      MLLM_RT_ASSERT_EQ(cfg->quant_to_type, kUInt8);
+      int32_t offset = 0;
+      if (cfg->quant_to_type == kUInt8) {
+        // Existing unsigned symmetric storage represents real zero at 128.
+        offset = -128;
+      } else if (cfg->quant_to_type != kInt8) {
+        MLLM_ERROR_EXIT(ExitCode::kCoreError, "Unsupported SymPerTensor storage type: {}",
+                        nameOfType(cfg->quant_to_type));
+      }
 
-      ret.scaleOffsetEncoding = Qnn_ScaleOffset_t{.scale = cfg->scale.item<float>(), .offset = -128};
+      ret.scaleOffsetEncoding = Qnn_ScaleOffset_t{.scale = cfg->scale.item<float>(), .offset = offset};
       MLLM_INFO("Configuring SymPerTensor quantization for tensor: {}, scale: {}", v->name(), cfg->scale.item<float>());
       break;
     }
@@ -953,6 +960,20 @@ std::shared_ptr<QnnDeviceAndContext> QnnAOTEnv::createContext(const std::string&
   MLLM_RT_ASSERT_EQ(qnn_htp_func_symbols_.qnn_interface_.logCreate(__mllmQnnLoggerCallback,QNN_LOG_LEVEL_VERBOSE, &context->log_), QNN_SUCCESS)
   MLLM_RT_ASSERT_EQ(QNN_BACKEND_NO_ERROR, qnn_htp_func_symbols_.qnn_interface_.backendCreate(context->log_, (const QnnBackend_Config_t**)context->bk_cfg_, &context->bk_handle_))
   // clang-format on
+
+  // External packages are opt-in so accepted native-op builds remain
+  // byte-for-byte unchanged. Experiments provide both the isolated package
+  // path and its interface provider through the environment.
+  if (const char* op_package_path = std::getenv("MLLM_QNN_AOT_OP_PACKAGE_PATH");
+      op_package_path != nullptr && op_package_path[0] != '\0') {
+    const char* provider = std::getenv("MLLM_QNN_AOT_OP_PACKAGE_PROVIDER");
+    if (provider == nullptr || provider[0] == '\0') { provider = "LLaMAPackageInterfaceProvider"; }
+    MLLM_RT_ASSERT(qnn_htp_func_symbols_.qnn_interface_.backendRegisterOpPackage != nullptr);
+    const auto status = qnn_htp_func_symbols_.qnn_interface_.backendRegisterOpPackage(
+        context->bk_handle_, op_package_path, provider, nullptr);
+    MLLM_RT_ASSERT_EQ(status, QNN_BACKEND_NO_ERROR);
+    MLLM_INFO("Registered AOT op package '{}' with provider '{}'", op_package_path, provider);
+  }
 
   // 2. Create HTP Device
   // clang-format off

@@ -515,6 +515,14 @@ QNNRuntime* QNNRuntime::initRuntime(ProfilingLevel profilingLevel, QnnLog_Level_
     };
 
     std::vector<OpPackageInfo> opPackages = {};
+    if (const char* path = std::getenv("MLLM_QNN_OP_PACKAGE_PATH"); path != nullptr && path[0] != '\0') {
+      const char* provider = std::getenv("MLLM_QNN_OP_PACKAGE_PROVIDER");
+      const char* target = std::getenv("MLLM_QNN_OP_PACKAGE_TARGET");
+      opPackages.push_back({path,
+                            provider != nullptr && provider[0] != '\0' ? provider
+                                                                        : "LLaMAPackageInterfaceProvider",
+                            target != nullptr ? target : ""});
+    }
 
     for (const auto& pkg : opPackages) {
       if (!qnnInterface.backendRegisterOpPackage) {
@@ -523,7 +531,7 @@ QNNRuntime* QNNRuntime::initRuntime(ProfilingLevel profilingLevel, QnnLog_Level_
       }
       if (QNN_BACKEND_NO_ERROR
           != qnnInterface.backendRegisterOpPackage(backendHandle, pkg.path.c_str(), pkg.interfaceProvider.c_str(),
-                                                   pkg.target.c_str())) {
+                                                   pkg.target.empty() ? nullptr : pkg.target.c_str())) {
         MLLM_ERROR("Could not register Op Package: {} and interface provider: {}", pkg.path.c_str(),
                    pkg.interfaceProvider.c_str());
         return nullptr;
