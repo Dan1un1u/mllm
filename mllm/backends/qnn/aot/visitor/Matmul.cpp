@@ -40,9 +40,12 @@ bool QnnAOTMatMulPattern::rewrite(ir::IRWriter& writer, const ir::op_ptr_t& op) 
   // EXP-0014 replaces MatMul only when the dedicated micrograph compiler
   // explicitly opts in. Normal model compilation remains on qti.aisw::MatMul.
   const char* hmx_probe = std::getenv("MLLM_QNN_QHPI_U8S8_HMX_PROBE");
+  const char* mixed_probe = std::getenv("MLLM_QNN_QHPI_MIXED_RESOURCE_PROBE");
   const bool use_hmx_probe = hmx_probe != nullptr && hmx_probe[0] != '\0' && hmx_probe[0] != '0';
-  auto qnn_op_node = QnnAOTNodeOperation::create(use_hmx_probe ? "U8S8HmxMatMul" : "MatMul");
-  qnn_op_node->setPackageName(use_hmx_probe ? "QhpiHmxProbePackage" : "qti.aisw");
+  const bool use_mixed_probe = mixed_probe != nullptr && mixed_probe[0] != '\0' && mixed_probe[0] != '0';
+  const char* op_type = use_mixed_probe ? "MixedResourceHmxHvxHmx" : use_hmx_probe ? "U8S8HmxMatMul" : "MatMul";
+  auto qnn_op_node = QnnAOTNodeOperation::create(op_type);
+  qnn_op_node->setPackageName(use_mixed_probe || use_hmx_probe ? "QhpiHmxProbePackage" : "qti.aisw");
 
   qnn_op_node->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, input0))
       ->emplaceInput(env->captureQnnAOTNodeTensor(qnn_context_name, qnn_graph_name, input1))

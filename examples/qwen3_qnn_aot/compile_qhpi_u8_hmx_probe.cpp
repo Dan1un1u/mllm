@@ -52,12 +52,14 @@ MLLM_MAIN({
   auto& qnn_aot_cfg = Argparse::add<std::string>("-aot_cfg|--aot_config").help("QNN AOT config.");
   auto& qnn_env = Argparse::add<std::string>("-qnn_env|--qnn_env_path").help("QAIRT x86 library path.");
   auto& output_context = Argparse::add<std::string>("-o|--output_context_name").help("Output context.");
+  auto& mode = Argparse::add<std::string>("--mode").help("single or mixed-resource.").def("single");
   Argparse::parse(argc, argv);
   if (help.isSet()) {
     Argparse::printHelp();
     return 0;
   }
-  if (!qnn_aot_cfg.isSet() || !qnn_env.isSet() || !output_context.isSet()) {
+  if (!qnn_aot_cfg.isSet() || !qnn_env.isSet() || !output_context.isSet()
+      || (mode.get() != "single" && mode.get() != "mixed-resource")) {
     Argparse::printHelp();
     return 2;
   }
@@ -75,15 +77,20 @@ MLLM_MAIN({
   auto ir = mllm::ir::lowlevel::traceStop();
   (void)output;
 
-  setenv("MLLM_QNN_QHPI_U8S8_HMX_PROBE", "1", 1);
+  if (mode.get() == "mixed-resource") {
+    setenv("MLLM_QNN_QHPI_MIXED_RESOURCE_PROBE", "1", 1);
+  } else {
+    setenv("MLLM_QNN_QHPI_U8S8_HMX_PROBE", "1", 1);
+  }
   auto qnn_aot_env =
       mllm::qnn::aot::QnnAOTEnv(qnn_env.get(), mllm::qnn::aot::parseQcomTargetMachineFromJSONFile(qnn_aot_cfg.get()));
   mllm::ir::PassManager pm(ir);
   pm.reg(mllm::qnn::aot::createQnnAOTLoweringPipeline(&qnn_aot_env, qnn_aot_cfg.get(), params));
   pm.run();
 
-  mllm::redirect("qhpi_u8_hmx_probe.mir", [&]() { mllm::print(ir); });
+  mllm::redirect(mode.get() == "mixed-resource" ? "qhpi_mixed_resource_probe.mir" : "qhpi_u8_hmx_probe.mir",
+                 [&]() { mllm::print(ir); });
   qnn_aot_env.saveContext("context.0", output_context.get());
-  mllm::print("EXP-0014 QHPI U8xS8 HMX probe compilation completed: " + output_context.get());
+  mllm::print("QHPI " + mode.get() + " probe compilation completed: " + output_context.get());
   return 0;
 });

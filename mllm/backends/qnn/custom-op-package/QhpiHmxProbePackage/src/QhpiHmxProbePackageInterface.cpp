@@ -18,7 +18,8 @@ namespace {
 
 constexpr auto kPackageName = THIS_PKG_NAME_STR;
 constexpr auto kOpName = "U8S8HmxMatMul";
-std::array<const char*, 1> op_names{{kOpName}};
+constexpr auto kMixedResourceOpName = "MixedResourceHmxHvxHmx";
+std::array<const char*, 2> op_names{{kOpName, kMixedResourceOpName}};
 Qnn_ApiVersion_t sdk_api_version = QNN_HTP_API_VERSION_INIT;
 Qnn_Version_t opset_version = {QNN_OPSET_VERSION_MAJOR, QNN_OPSET_VERSION_MINOR, QNN_OPSET_VERSION_PATCH};
 QnnOpPackage_Info_t package_info = {kPackageName,     op_names.data(),  nullptr, op_names.size(), nullptr, 0,
@@ -30,7 +31,8 @@ QnnLog_Level_t max_log_level = static_cast<QnnLog_Level_t>(0);
 
 }  // namespace
 
-extern void register_u8s8_hmx_matmul_op();
+extern const QHPI_OpInfo_v1* u8s8_hmx_matmul_op_info();
+extern const QHPI_OpInfo_v1* mixed_resource_hmx_hvx_hmx_op_info();
 
 Qnn_ErrorHandle_t QhpiHmxProbePackageInit(QnnOpPackage_GlobalInfrastructure_t infrastructure) {
   if (package_initialized) return QNN_OP_PACKAGE_ERROR_LIBRARY_ALREADY_INITIALIZED;
@@ -47,8 +49,11 @@ Qnn_ErrorHandle_t QhpiHmxProbePackageGetInfo(const QnnOpPackage_Info_t** info) {
 }
 
 Qnn_ErrorHandle_t QhpiHmxProbePackageValidateOpConfig(Qnn_OpConfig_t config) {
+  const bool known_op = config.version == QNN_OPCONFIG_VERSION_1 && config.v1.typeName != nullptr
+                        && (std::string(config.v1.typeName) == kOpName
+                            || std::string(config.v1.typeName) == kMixedResourceOpName);
   if (config.version != QNN_OPCONFIG_VERSION_1 || config.v1.packageName == nullptr || config.v1.typeName == nullptr
-      || std::string(config.v1.packageName) != kPackageName || std::string(config.v1.typeName) != kOpName
+      || std::string(config.v1.packageName) != kPackageName || !known_op
       || config.v1.numOfParams != 0 || config.v1.numOfInputs != 2 || config.v1.numOfOutputs != 1) {
     return QNN_OP_PACKAGE_ERROR_VALIDATION_FAILURE;
   }
@@ -106,6 +111,8 @@ extern "C" QNN_API Qnn_ErrorHandle_t QhpiHmxProbePackageInterfaceProvider(QnnOpP
 }
 
 extern "C" QNN_API const char* qhpi_init() {
-  register_u8s8_hmx_matmul_op();
+  static std::array<QHPI_OpInfo_v1, 2> registered_ops{{*u8s8_hmx_matmul_op_info(),
+                                                       *mixed_resource_hmx_hvx_hmx_op_info()}};
+  qhpi_register_ops_v1(registered_ops.size(), registered_ops.data(), kPackageName);
   return kPackageName;
 }

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -20,6 +21,7 @@ namespace {
 
 constexpr uint32_t kSpatial = 64;
 constexpr uint32_t kChannels = 32;
+constexpr uint32_t kPhaseWordBytes = sizeof(uint32_t);
 
 size_t packedWeightOffset(uint32_t input_channel, uint32_t output_channel) {
   return (static_cast<size_t>(input_channel / 4) * kChannels + output_channel) * 4 + input_channel % 4;
@@ -34,6 +36,7 @@ MLLM_MAIN({
   auto& profile_dir = Argparse::add<std::string>("--profile_dir").help("Profiling output directory.");
   auto& iterations = Argparse::add<int>("--iterations").help("Measured executions.").def(1);
   auto& profile_level = Argparse::add<std::string>("--profile_level").help("off or optrace.").def("optrace");
+  auto& pipeline = Argparse::add<std::string>("--pipeline").help("single or mixed-resource.").def("single");
   auto& pattern = Argparse::add<std::string>("--pattern")
                       .help("structured, identity, permuted-signed, or map-weight diagnostic inputs.")
                       .def("structured");
@@ -45,9 +48,11 @@ MLLM_MAIN({
   }
   if (!context_path.isSet() || !graph_name.isSet() || !profile_dir.isSet() || iterations.get() <= 0
       || (profile_level.get() != "off" && profile_level.get() != "optrace")
+      || (pipeline.get() != "single" && pipeline.get() != "mixed-resource")
       || (pattern.get() != "structured" && pattern.get() != "identity" && pattern.get() != "permuted-signed"
           && pattern.get() != "map-weight")
-      || map_offset.get() < -1 || map_offset.get() >= static_cast<int>(kChannels * kChannels)) {
+      || map_offset.get() < -1 || map_offset.get() >= static_cast<int>(kChannels * kChannels)
+      || (pipeline.get() == "mixed-resource" && pattern.get() == "map-weight")) {
     Argparse::printHelp();
     return 2;
   }
@@ -95,6 +100,11 @@ MLLM_MAIN({
         weight.ptr<int8_t>()[packedWeightOffset(input_channel, output_channel)] = coefficient;
       }
     }
+    // EXP-0015 Stage A uses the final packed word as a TCM-only phase word.
+    // Keep its four logical coefficients at zero; the device sees 0x80808080
+    // after QNN applies the S8 tensor's physical offset.
+    std::fill(weight.ptr<int8_t>() + kChannels * kChannels - kPhaseWordBytes,
+              weight.ptr<int8_t>() + kChannels * kChannels, 0);
   }
 
   std::vector<mllm::Tensor> inputs{activation, weight};
@@ -148,6 +158,38 @@ MLLM_MAIN({
     backend->graphExecute(graph_name.get(), inputs, outputs);
   }
 
+  std::vector<uint8_t> first_stage(kSpatial * kChannels);
+  std::vector<uint8_t> hvx_stage(kSpatial * kChannels);
+  std::vector<uint8_t> reference(kSpatial * kChannels);
+  for (uint32_t spatial = 0; spatial < kSpatial; ++spatial) {
+    for (uint32_t output_channel = 0; output_channel < kChannels; ++output_channel) {
+      int32_t accumulator = 0;
+      for (uint32_t input_channel = 0; input_channel < kChannels; ++input_channel) {
+        const int32_t value = activation.ptr<uint8_t>()[spatial * kChannels + input_channel];
+        const int32_t coefficient = weight.ptr<int8_t>()[packedWeightOffset(input_channel, output_channel)];
+        accumulator += (value - kInputZeroPoint) * coefficient;
+      }
+      const size_t index = spatial * kChannels + output_channel;
+      first_stage[index] = static_cast<uint8_t>(std::clamp(accumulator, 0, 255));
+      hvx_stage[index] = static_cast<uint8_t>(std::min(static_cast<int32_t>(first_stage[index]) + 1, 255));
+    }
+  }
+  if (pipeline.get() == "mixed-resource") {
+    for (uint32_t spatial = 0; spatial < kSpatial; ++spatial) {
+      for (uint32_t output_channel = 0; output_channel < kChannels; ++output_channel) {
+        int32_t accumulator = 0;
+        for (uint32_t input_channel = 0; input_channel < kChannels; ++input_channel) {
+          const int32_t value = hvx_stage[spatial * kChannels + input_channel];
+          const int32_t coefficient = weight.ptr<int8_t>()[packedWeightOffset(input_channel, output_channel)];
+          accumulator += value * coefficient;
+        }
+        reference[spatial * kChannels + output_channel] = static_cast<uint8_t>(std::clamp(accumulator, 0, 255));
+      }
+    }
+  } else {
+    reference = first_stage;
+  }
+
   size_t mismatches = 0;
   int32_t minimum_reference = 255;
   int32_t maximum_reference = 0;
@@ -157,29 +199,36 @@ MLLM_MAIN({
   std::vector<std::pair<int32_t, int32_t>> first_pairs;
   for (uint32_t spatial = 0; spatial < kSpatial; ++spatial) {
     for (uint32_t output_channel = 0; output_channel < kChannels; ++output_channel) {
-      int32_t accumulator = 0;
-      for (uint32_t input_channel = 0; input_channel < kChannels; ++input_channel) {
-        const int32_t value = activation.ptr<uint8_t>()[spatial * kChannels + input_channel];
-        const int32_t coefficient = weight.ptr<int8_t>()[packedWeightOffset(input_channel, output_channel)];
-        accumulator += (value - kInputZeroPoint) * coefficient;
-      }
-      const auto reference = static_cast<uint8_t>(std::clamp(accumulator, 0, 255));
-      const auto actual = output.ptr<uint8_t>()[spatial * kChannels + output_channel];
-      minimum_reference = std::min(minimum_reference, static_cast<int32_t>(reference));
-      maximum_reference = std::max(maximum_reference, static_cast<int32_t>(reference));
+      const size_t index = spatial * kChannels + output_channel;
+      const auto expected = reference[index];
+      const auto actual = output.ptr<uint8_t>()[index];
+      minimum_reference = std::min(minimum_reference, static_cast<int32_t>(expected));
+      maximum_reference = std::max(maximum_reference, static_cast<int32_t>(expected));
       minimum_output = std::min(minimum_output, static_cast<int32_t>(actual));
       maximum_output = std::max(maximum_output, static_cast<int32_t>(actual));
       output_sum += actual;
-      if (first_pairs.size() < 64) first_pairs.emplace_back(actual, reference);
-      if (actual != reference) ++mismatches;
+      if (first_pairs.size() < 64) first_pairs.emplace_back(actual, expected);
+      if (actual != expected) ++mismatches;
     }
   }
-  std::cout << "pattern=" << pattern.get() << " iterations=" << iterations.get()
+  std::cout << "pipeline=" << pipeline.get() << " pattern=" << pattern.get() << " iterations=" << iterations.get()
             << " output_first=" << static_cast<int32_t>(output.ptr<uint8_t>()[0]) << " output_min=" << minimum_output
             << " output_max=" << maximum_output << " output_sum=" << output_sum << " reference_min=" << minimum_reference
             << " reference_max=" << maximum_reference << " mismatches=" << mismatches << '\n';
   std::cout << "first_actual_reference=";
   for (const auto& [actual, reference] : first_pairs) { std::cout << actual << ':' << reference << ','; }
   std::cout << '\n';
+  if (pipeline.get() == "mixed-resource") {
+    std::array<size_t, 16> resource_markers{};
+    for (size_t index = 0; index < kSpatial * kChannels; ++index) {
+      const uint8_t value = output.ptr<uint8_t>()[index];
+      if (value >= 240) ++resource_markers[value - 240];
+    }
+    std::cout << "resource_marker_counts=";
+    for (size_t marker = 0; marker < resource_markers.size(); ++marker) {
+      std::cout << (240 + marker) << ':' << resource_markers[marker] << ',';
+    }
+    std::cout << '\n';
+  }
   return mismatches == 0 ? 0 : 1;
 });

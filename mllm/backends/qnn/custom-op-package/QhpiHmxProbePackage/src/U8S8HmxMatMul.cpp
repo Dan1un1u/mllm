@@ -149,4 +149,4 @@ QHPI_OpInfo_v1 op_info[] = {{.name = THIS_PKG_NAME_STR "::U8S8HmxMatMul",
 
 }  // namespace
 
-void register_u8s8_hmx_matmul_op() { qhpi_register_ops_v1(1, op_info, THIS_PKG_NAME_STR); }
+const QHPI_OpInfo_v1* u8s8_hmx_matmul_op_info() { return op_info; }

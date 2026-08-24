@@ -75,3 +75,45 @@ The gate passes only when all of the following are independently observed:
 Graph input and output boundary DMA is outside the custom-node zero-DRAM
 contract. Passing this probe establishes backend feasibility only; it does not
 adopt or authorize a fused Attention implementation.
+
+## EXP-0015 mixed-resource plumbing mode
+
+The same isolated package also registers `MixedResourceHmxHvxHmx`. It is a
+Stage-A plumbing gate, not the fused GQA implementation. One resource-exclusive
+QHPI invocation performs:
+
+```text
+HMX U8xS8 -> output crouton
+HVX saturating byte add-one in place
+HMX U8xS8 -> output crouton
+```
+
+The signed weight and asymmetric-correction bias blocks are staged first in
+the output crouton and then in the now-dead activation crouton. The second HMX
+tile reads and overwrites the output crouton in place. A reserved zero weight
+word carries the phase between resource classes in VTCM; `sync_block_size` is
+zero because QAIRT 2.49 serializes QHPI sync blocks as DDR tensors. No
+graph-visible workspace is used.
+Compile the existing probe with `--mode mixed-resource` and run it with
+`--pipeline mixed-resource`. Formal acceptance still requires device output to
+match the two-HMX host reference byte for byte and Optrace to prove both HMX and
+HVX execution with zero custom-node DRAM.
+
+### QAIRT 2.49 / V79 Stage-A finding
+
+This candidate does not pass Stage A. With `QHPI_RESOURCE_EXCLUSIVE`, the
+target invokes a main-control callback (`qhpi_thread_resources() == 0`) and an
+HVX callback, but does not provide the HMX execution context used by the
+accepted EXP-0014 `QHPI_RESOURCE_HMX` kernel. Issuing even one copy of the
+EXP-0014 HMX tile from the exclusive main callback causes a CDSP subsystem
+restart (`DspTransport 0x10`, graph error `1003`). Setting `multithreaded=true`
+does not change the dispatched resource classes, and the apparent combined
+flag `QHPI_RESOURCE_HVX | QHPI_RESOURCE_HMX` is rejected by the compiler as
+resource flag `0x6`.
+
+QHPI synchronization memory is also unsuitable for the zero-DRAM contract in
+this SDK: an 8192-byte sync block produces `ddrTensorSize=8704`, while the
+TCM-tensor phase-word variant produces `ddrTensorSize=0`. The guarded
+`QHPI_MIXED_RESOURCE_AUDIT` and `QHPI_EXCLUSIVE_SINGLE_HMX_AUDIT` builds retain
+the minimal reproductions. Stage B must not be started unless the experiment
+contract is explicitly changed.
