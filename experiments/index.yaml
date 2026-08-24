@@ -417,14 +417,15 @@ experiments:
   title: QHPI fused GQA QK-Softmax-AV core
   parent: null
   variants: []
-  execution_state: running
-  evidence_validity: not_checked
-  local_gate: not_run
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: fail
   adoption_status: pending
   evidence_profile: micrograph-performance
   source_branches:
   - codex/exp-0015-qhpi-fused-gqa-core
-  source_commits: []
+  source_commits:
+  - ba92c30436ea1914de7ce790bd63b054c390d93c
   record: docs/experiments/EXP-0015.md
   distinct_from:
   - EXP-0009
@@ -448,3 +449,6 @@ experiments:
     source_worktree: /home/daniuniu/work/mllm-w4a8
     source_branch: codex/exp-0015-qhpi-fused-gqa-core
     started_on: '2026-08-25'
+  evidence:
+  - /mnt/d/llm_exp/results/exp0015_qhpi_fused_gqa_core_20260825
+  - /mnt/d/llm_exp/models/exp0015_qhpi_fused_gqa_core/20260825-stage-a
