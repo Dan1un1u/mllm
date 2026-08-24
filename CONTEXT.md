@@ -121,3 +121,15 @@ Device-measured elapsed time for a Candidate and its reference using identical
 functional boundaries, input placement, output placement, and measurement
 protocol. It is the primary local performance gate.
 _Avoid_: work cycles, active cycles, fastest single run
+
+**Implementation Correctness**:
+Evidence that device execution faithfully implements the Experiment's declared
+local algorithm, tensor indexing, masking, quantization, and output contract.
+A failure is an implementation defect and blocks a performance claim.
+_Avoid_: model-quality accuracy, similarity to W4A16
+
+**Accuracy Diagnostic**:
+A non-blocking local comparison against the W4A16 comparator used to quantify
+the numerical effect of an experimental W4A8 implementation. It does not stop
+a speed-first Experiment unless explicitly declared as a hard gate.
+_Avoid_: Implementation Correctness, full-model accuracy gate
