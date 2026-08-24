@@ -381,14 +381,15 @@ experiments:
   title: QHPI in-graph U8xS8 HMX feasibility gate
   parent: null
   variants: []
-  execution_state: running
-  evidence_validity: not_checked
-  local_gate: not_run
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: pass
   adoption_status: pending
   evidence_profile: micrograph-performance
   source_branches:
   - codex/exp-0014-qhpi-u8-hmx-feasibility
-  source_commits: []
+  source_commits:
+  - e47c775c70d5eb009489b84772cca036630cac32
   record: docs/experiments/EXP-0014.md
   distinct_from:
   - EXP-0009
@@ -408,3 +409,6 @@ experiments:
     source_worktree: /home/daniuniu/work/mllm-w4a8
     source_branch: codex/exp-0014-qhpi-u8-hmx-feasibility
     started_on: '2026-08-24'
+  evidence:
+  - /mnt/d/llm_exp/results/exp0014_qhpi_u8_hmx_feasibility_20260824
+  - /mnt/d/llm_exp/models/exp0014_qhpi_u8_hmx_probe/20260824-attempt3
