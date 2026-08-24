@@ -412,3 +412,34 @@ experiments:
   evidence:
   - /mnt/d/llm_exp/results/exp0014_qhpi_u8_hmx_feasibility_20260824
   - /mnt/d/llm_exp/models/exp0014_qhpi_u8_hmx_probe/20260824-attempt3
+- id: EXP-0015
+  slug: qhpi-fused-gqa-core
+  title: QHPI fused GQA QK-Softmax-AV core
+  parent: null
+  variants: []
+  execution_state: proposed
+  evidence_validity: not_checked
+  local_gate: not_run
+  adoption_status: pending
+  evidence_profile: micrograph-performance
+  source_branches:
+  - codex/exp-0015-qhpi-fused-gqa-core
+  source_commits: []
+  record: docs/experiments/EXP-0015.md
+  distinct_from:
+  - EXP-0009
+  - EXP-0010
+  - EXP-0012
+  - EXP-0014
+  hard_gate: Stage A must prove one in-graph HMX-HVX-HMX QHPI core with true HMX QK
+    and AV, core-attributed DRAM read-write 0-0, no spill-fill, fallback, or graph
+    split, and exact device agreement with the declared bit-exact implementation reference.
+    Stage B must implement layer 14 s32 context 1024 for one two-query-head GQA group
+    and achieve equivalent-scope median wall latency no slower than native under the
+    matched protocol. A Stage A failure or Implementation Correctness failure stops
+    immediately; a Stage B speed failure stops before layer or full-model expansion.
+    W4A16 local accuracy metrics are informational and never stop this speed-first
+    experiment.
+  reopen_condition: not_applicable
+  decided_by: pending
+  decided_on: '2026-08-25'
