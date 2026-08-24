@@ -417,7 +417,7 @@ experiments:
   title: QHPI fused GQA QK-Softmax-AV core
   parent: null
   variants: []
-  execution_state: proposed
+  execution_state: approved
   evidence_validity: not_checked
   local_gate: not_run
   adoption_status: pending
@@ -441,5 +441,6 @@ experiments:
     W4A16 local accuracy metrics are informational and never stop this speed-first
     experiment.
   reopen_condition: not_applicable
-  decided_by: pending
+  decided_by: user
   decided_on: '2026-08-25'
+  approval_ref: 'User message 2026-08-25: 全部同意'
