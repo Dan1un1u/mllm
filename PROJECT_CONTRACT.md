@@ -51,10 +51,17 @@ approval and a committed contract amendment.
   manifests and Optrace evidence for the physical activation contract.
 - **PC-015 — Profiling reuse.** Use the existing profiling components and retain
   raw evidence needed to compare with the registered comparator.
-- **PC-016 — No mandatory speed or accuracy threshold.** An approved
-  exploratory experiment may complete without net speedup and with only its
-  declared numerical sanity check. It must still be mathematically implemented
-  as declared and run successfully.
+- **PC-016 — Speed-first exploratory scope.** An approved exploratory
+  experiment may complete without net speedup or a model-quality pass. The
+  Selected W4A8 Baseline is currently not usable for model-quality claims; its
+  recorded full-model sanity is `0/100`, and investigation of accumulated
+  quantization error is deferred while the active scope prioritizes A8
+  execution speed. Full-model accuracy and comparison against the W4A16
+  comparator are informational unless an Experiment explicitly declares them
+  as hard gates. Failure of an informational accuracy threshold does not stop a
+  speed-first Experiment. The declared local algorithm must still be
+  implemented correctly, checked against its implementation reference, and run
+  successfully.
 - **PC-017 — Separate tracks.** Report prefill and decode independently. A gain
   in one must not conceal a regression in the other.
 - **PC-018 — Comparison key.** A speedup or regression claim requires matching
@@ -66,15 +73,6 @@ approval and a committed contract amendment.
 - **PC-020 — Compiler-only correctness.** A compiler scheduling change must
   preserve the declared upper-layer numerical contract before its performance
   result is accepted.
-- **PC-031 — Current W4A8 accuracy scope.** The Selected W4A8 Baseline is not
-  currently usable for model-quality claims; its recorded full-model sanity is
-  `0/100`. Investigation of accumulated full-model quantization error is
-  deferred while the active research scope prioritizes A8 execution speed.
-  Full-model accuracy is informational unless an approved Experiment declares
-  otherwise. Every changed local computation must still pass its declared
-  mathematical and numerical correctness check, using the W4A16 comparator as
-  the accuracy reference when specified.
-
 ## Governance
 
 - **PC-021 — Baseline authority.** Only the user may promote a Selected
