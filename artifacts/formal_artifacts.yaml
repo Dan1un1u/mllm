@@ -1,0 +1,313 @@
+schema_version: 1
+artifacts:
+  - roles: [archived_reference, performance_comparator]
+    artifact_role: source_model
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a16\source_g32_export'
+    relative_path: qwen3_1.7b_g32.mllm
+    size_bytes: 2402965508
+    sha256: 8240c2850154a9aaa9e5c938ebb114723bb7416e4c210698dfbfd893d6824001
+    required: true
+
+  - roles: [archived_reference, performance_comparator]
+    artifact_role: source_export_manifest
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a16\source_g32_export'
+    relative_path: export_manifest.json
+    size_bytes: 91149
+    sha256: 881b6ef269e2ee8e77958ed196548f2549f2a093054f08d451687047c7fc9a7e
+    required: true
+
+  - roles: [archived_reference]
+    artifact_role: compiled_context
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a16'
+    relative_path: qwen3-1.7B-lpbq-sha-g32.bin
+    size_bytes: 1563062272
+    sha256: f637b4ddbd63478205679f40642fd24801093bb98ddf0808f13d99e3fb155d5d
+    required: true
+
+  - roles: [archived_reference]
+    artifact_role: quant_manifest_s1
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a16\schematics'
+    relative_path: model.0.s1_quant_manifest.json
+    size_bytes: 16334384
+    sha256: eb51f99540caf00a947d318418bc353c2b82d2e86814aff49083992144f8f463
+    required: true
+
+  - roles: [archived_reference]
+    artifact_role: quant_manifest_s32
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a16\schematics'
+    relative_path: model.0.s32_quant_manifest.json
+    size_bytes: 16345118
+    sha256: 9c26f31a3cd15c37114dc0b4f2a662839c2681316b54e1e7b25e2a1dad503d27
+    required: true
+
+  - roles: [archived_reference]
+    artifact_role: schematic_s1
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a16\schematics'
+    relative_path: model.0.s1_schematic.bin
+    size_bytes: 161023545
+    sha256: eaa484fb1b5446c60c130235e256a485e92ddeccdea96fead0026e3a3f977648
+    required: true
+
+  - roles: [archived_reference]
+    artifact_role: schematic_s32
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a16\schematics'
+    relative_path: model.0.s32_schematic.bin
+    size_bytes: 164911794
+    sha256: df2b8776625b6167d1306bb7c26ad4c9d2e62a4e8b8954a4c7d3505614032434
+    required: true
+
+  - roles: [archived_reference]
+    artifact_role: result_artifact_manifest
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_g32_20260807_230410'
+    relative_path: artifact_sha256.txt
+    size_bytes: 962
+    sha256: b668b3fde9ed89cff31585cdbfeb4345c75410d0b5bb00a43cdfff1a361f05c9
+    required: true
+
+  - roles: [archived_reference]
+    artifact_role: result_metadata
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_g32_20260807_230410'
+    relative_path: experiment_metadata.txt
+    size_bytes: 1936
+    sha256: 55e9ec73cbf3c0afddbc0f7e5318e0d0d9687eabbd10af359731dc9b17301518
+    required: true
+
+  - roles: [archived_reference]
+    artifact_role: speed_summary
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_g32_20260807_230410'
+    relative_path: qwen3-sm8750-v79-g32-speed.json
+    size_bytes: 2207
+    sha256: eebfe276846e952fcf1ed84fdedc090782f19ec2e809947e1a38c12a784a09db
+    required: true
+
+  - roles: [archived_reference]
+    artifact_role: accuracy_summary
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_g32_20260807_230410'
+    relative_path: qwen3-sm8750-v79-g32-accuracy.json
+    size_bytes: 21007
+    sha256: 7cbf6562646883d04a0e3f9cdb73856ea8bbaa517f28e71ed91f6f7d601615f0
+    required: true
+
+  - roles: [archived_reference]
+    artifact_role: critical_path_report
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_g32_20260807_230410'
+    relative_path: qwen3-sm8750-v79-g32-e2e-critical-path.html
+    size_bytes: 394103
+    sha256: e623f715f66b316ae517d7c72bcefc05e97cc031eb29b96bd8f4b0fd1215105e
+    required: true
+
+  - roles: [archived_reference]
+    artifact_role: raw_optrace_s1
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_g32_20260807_230410'
+    relative_path: qwen3-sm8750-v79-g32-s1-optrace.log
+    size_bytes: 6407932
+    sha256: b8891cbb6b900b3ce4237def892643f54375cb22a29730f25f216af359bfe6ef
+    required: true
+
+  - roles: [archived_reference]
+    artifact_role: raw_optrace_s32
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_g32_20260807_230410'
+    relative_path: qwen3-sm8750-v79-g32-s32-optrace.log
+    size_bytes: 6543204
+    sha256: ccbb7d5f6fb2a67c340aa949301445b76485f219bffeb32031b48b059c24999f
+    required: true
+
+  - roles: [performance_comparator]
+    artifact_role: compiled_context
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a16_qairt249\20260822\default'
+    relative_path: context.bin
+    size_bytes: 1563078656
+    sha256: e16cb6ee98967385feaa72545c94c036d0578b3af5e7d6eb8149a0c9dee6e5aa
+    required: true
+
+  - roles: [performance_comparator]
+    artifact_role: quant_manifest_s1
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a16_qairt249\20260822\default\manifests'
+    relative_path: model.0.s1_quant_manifest.json
+    size_bytes: 16334384
+    sha256: eb51f99540caf00a947d318418bc353c2b82d2e86814aff49083992144f8f463
+    required: true
+
+  - roles: [performance_comparator]
+    artifact_role: quant_manifest_s32
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a16_qairt249\20260822\default\manifests'
+    relative_path: model.0.s32_quant_manifest.json
+    size_bytes: 16345118
+    sha256: 9c26f31a3cd15c37114dc0b4f2a662839c2681316b54e1e7b25e2a1dad503d27
+    required: true
+
+  - roles: [performance_comparator]
+    artifact_role: schematic_s1
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a16_qairt249\20260822\default\schematics'
+    relative_path: model.0.s1_schematic.bin
+    size_bytes: 161032595
+    sha256: 3daacd8375d5439d2cf85eea90490a6e6211a54faed33f9b0d76d3162bfb79d4
+    required: true
+
+  - roles: [performance_comparator]
+    artifact_role: schematic_s32
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a16_qairt249\20260822\default\schematics'
+    relative_path: model.0.s32_schematic.bin
+    size_bytes: 165018384
+    sha256: 488d2476c05f031df849705a09f10edb24b322c5d9e6de5cd9af6a7a16f7818a
+    required: true
+
+  - roles: [performance_comparator]
+    artifact_role: result_artifact_manifest
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a16_qairt249_default_20260822_223744'
+    relative_path: artifact_sha256.txt
+    size_bytes: 1428
+    sha256: 9c9d84c587cda1a564838dadab8e8df62409110cdd0e8dccdb8eaa31d1376ce0
+    required: true
+
+  - roles: [performance_comparator]
+    artifact_role: result_metadata
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a16_qairt249_default_20260822_223744'
+    relative_path: experiment_metadata.txt
+    size_bytes: 2274
+    sha256: 40a1d0ffffe60ea968e88f64925e8be66439e047885069e301c45ff5c126e3dd
+    required: true
+
+  - roles: [performance_comparator]
+    artifact_role: speed_summary
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a16_qairt249_default_20260822_223744'
+    relative_path: qwen3-sm8750-v79-g32-speed.json
+    size_bytes: 3285
+    sha256: f2f25c258ea494a9c0589f965422dc66e7f612c16d516bc335b23d2e70602a2a
+    required: true
+
+  - roles: [performance_comparator]
+    artifact_role: accuracy_summary
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a16_qairt249_default_20260822_223744'
+    relative_path: qwen3-sm8750-v79-g32-accuracy.json
+    size_bytes: 21012
+    sha256: d32d883471f9094819c5b5a35dc06d866588415858ec3814f8facec4ffc794ac
+    required: true
+
+  - roles: [performance_comparator]
+    artifact_role: raw_optrace_s1
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a16_qairt249_default_20260822_223744'
+    relative_path: qwen3-sm8750-v79-g32-s1-optrace.log
+    size_bytes: 6413212
+    sha256: 2ab6405979aa238131c50276a7281aeacd2542db73d4dfa2cfe8e38d35d93d60
+    required: true
+
+  - roles: [performance_comparator]
+    artifact_role: raw_optrace_s32
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a16_qairt249_default_20260822_223744'
+    relative_path: qwen3-sm8750-v79-g32-s32-optrace.log
+    size_bytes: 6550020
+    sha256: 0d19bccc01f6215304c6667ebaab957caece86ae44f9dfbd6828ac6636b1309b
+    required: true
+
+  - roles: [selected_w4a8_baseline]
+    artifact_role: source_model
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a8_rmsnorm_u8\20260813_211529'
+    relative_path: qwen3-1.7B-w4a8g32-rmsnorm-u8.mllm
+    size_bytes: 2402510682
+    sha256: de6c789a684f3276d16b9673f13f4c69aa9eb4a68ab8b9fca2a76be3fbb75a3e
+    required: true
+
+  - roles: [selected_w4a8_baseline]
+    artifact_role: compiled_context
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a8_rmsnorm_u8_qairt249\20260823\p19'
+    relative_path: qwen3-1.7B-w4a8g32-rmsnorm-u8-qairt249-p19.bin
+    size_bytes: 1556979712
+    sha256: df67e7f1410cc58a348f7212176628afdc97465c06fb6231236cddb581a3e7c6
+    required: true
+
+  - roles: [selected_w4a8_baseline]
+    artifact_role: profile_contract
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a8_rmsnorm_u8_qairt249\20260823\p19'
+    relative_path: profile-contract.env
+    size_bytes: 2106
+    sha256: 6506826bbc8da2e708026f9cf46998333091c2e49e95745579e7cae2b8966ce5
+    required: true
+
+  - roles: [selected_w4a8_baseline]
+    artifact_role: quant_manifest_s1
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a8_rmsnorm_u8_qairt249\20260823\p19\manifests'
+    relative_path: model.0.s1_quant_manifest.json
+    size_bytes: 16207568
+    sha256: 87bf57c5849180fcd77b09cf06b65aa003862f9603ee03570a71023c8e70dd5c
+    required: true
+
+  - roles: [selected_w4a8_baseline]
+    artifact_role: quant_manifest_s32
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a8_rmsnorm_u8_qairt249\20260823\p19\manifests'
+    relative_path: model.0.s32_quant_manifest.json
+    size_bytes: 16218303
+    sha256: 306bf8c07b9f67572611117bf0c7a39e8905ced9eae85f1aa73bde89206bceb8
+    required: true
+
+  - roles: [selected_w4a8_baseline]
+    artifact_role: schematic_s1
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a8_rmsnorm_u8_qairt249\20260823\p19\schematics'
+    relative_path: model.0.s1_schematic.bin
+    size_bytes: 154082182
+    sha256: 438a82251ab17758e77a760f17c08217589a7ce46a190d1804134662338b1ff3
+    required: true
+
+  - roles: [selected_w4a8_baseline]
+    artifact_role: schematic_s32
+    root_windows: 'D:\llm_exp\models\qwen3_sm8750_v79\g32\w4a8_rmsnorm_u8_qairt249\20260823\p19\schematics'
+    relative_path: model.0.s32_schematic.bin
+    size_bytes: 161830598
+    sha256: 307e8b365f40fe6bd413f7123af73e38b8a0d698a209354e368f685f154d68c3
+    required: true
+
+  - roles: [selected_w4a8_baseline]
+    artifact_role: result_artifact_manifest
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a8_rmsnorm_u8_qairt249_p19_20260823_132031'
+    relative_path: artifact_sha256.txt
+    size_bytes: 1493
+    sha256: d5589a8a3ab8d36bd1fb1a257ed5838aaeaa722459c66f5d11d9b720bd16c5ac
+    required: true
+
+  - roles: [selected_w4a8_baseline]
+    artifact_role: result_metadata
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a8_rmsnorm_u8_qairt249_p19_20260823_132031'
+    relative_path: experiment_metadata.txt
+    size_bytes: 2384
+    sha256: edf3257f64c7e6ced0cfafa5f27f454edd4bc2225294bb8007af8ae30da38a9a
+    required: true
+
+  - roles: [selected_w4a8_baseline]
+    artifact_role: speed_summary
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a8_rmsnorm_u8_qairt249_p19_20260823_132031'
+    relative_path: qwen3-sm8750-v79-g32-speed.json
+    size_bytes: 2307
+    sha256: 0725bb3360e90ac7659ceae1b30d644bb11f9953340ece6a75287643ff00308a
+    required: true
+
+  - roles: [selected_w4a8_baseline]
+    artifact_role: accuracy_summary
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a8_rmsnorm_u8_qairt249_p19_20260823_132031'
+    relative_path: qwen3-sm8750-v79-g32-accuracy.json
+    size_bytes: 76420
+    sha256: 60f2e3813045b52fd7cf3fc41f3ff0d73c097de5bffbaf07688a2020bec3efe0
+    required: true
+
+  - roles: [selected_w4a8_baseline]
+    artifact_role: critical_path_report
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a8_rmsnorm_u8_qairt249_p19_20260823_132031'
+    relative_path: qwen3-sm8750-v79-g32-e2e-critical-path.html
+    size_bytes: 411578
+    sha256: 90c9f2b818fdfbfa28ec8f0b63db063ae1e0fb0c0641273cfb772b2cb5d37e87
+    required: true
+
+  - roles: [selected_w4a8_baseline]
+    artifact_role: raw_optrace_s1
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a8_rmsnorm_u8_qairt249_p19_20260823_132031'
+    relative_path: qwen3-sm8750-v79-g32-s1-optrace.log
+    size_bytes: 6615292
+    sha256: f18e4a1e37dcd220b5262b94ddab905a9d8c1ddf78a1ba92bd9ca788990ace4c
+    required: true
+
+  - roles: [selected_w4a8_baseline]
+    artifact_role: raw_optrace_s32
+    root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a8_rmsnorm_u8_qairt249_p19_20260823_132031'
+    relative_path: qwen3-sm8750-v79-g32-s32-optrace.log
+    size_bytes: 6734596
+    sha256: 574a377d121c4001cb7bd560385fcb2fe94a0bf0f50b1e23fa48c191d134167d
+    required: true

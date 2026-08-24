@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project",
+    "toolchain",
+    "governance",
+    "roles",
+    "performance_snapshot",
+    "closed_families"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "project": {
+      "type": "object",
+      "required": [
+        "id",
+        "repository_url",
+        "git_common_dir",
+        "source_root",
+        "memory_branch",
+        "memory_worktree",
+        "updated_on"
+      ]
+    },
+    "toolchain": {
+      "type": "object",
+      "required": ["qairt_release", "hardware", "soc", "backend", "accelerator"]
+    },
+    "governance": {
+      "type": "object",
+      "required": [
+        "active_experiment",
+        "next_experiment_number",
+        "maximum_running_experiments",
+        "source_branch_pattern",
+        "sync_policy",
+        "stale_fallback_allowed"
+      ]
+    },
+    "roles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "archived_reference",
+        "performance_comparator",
+        "selected_w4a8_baseline"
+      ],
+      "properties": {
+        "archived_reference": {"$ref": "#/definitions/role"},
+        "performance_comparator": {"$ref": "#/definitions/role"},
+        "selected_w4a8_baseline": {"$ref": "#/definitions/role"}
+      }
+    },
+    "performance_snapshot": {"type": "object"},
+    "closed_families": {"type": "array"}
+  },
+  "definitions": {
+    "role": {
+      "type": "object",
+      "required": [
+        "name",
+        "experiment",
+        "tag",
+        "qairt_release",
+        "result_root_windows",
+        "artifact_manifest_role",
+        "prefill_tokens_per_second",
+        "decode_tokens_per_second",
+        "sanity_passed",
+        "sanity_total"
+      ]
+    }
+  }
+}

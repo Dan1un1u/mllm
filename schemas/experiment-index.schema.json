@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project", "allowed_values", "experiments"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "project": {"const": "mllm-w4a8g32"},
+    "allowed_values": {"type": "object"},
+    "experiments": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/experiment"}
+    }
+  },
+  "definitions": {
+    "experiment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "slug",
+        "title",
+        "parent",
+        "variants",
+        "execution_state",
+        "evidence_validity",
+        "local_gate",
+        "adoption_status",
+        "evidence_profile",
+        "source_branches",
+        "source_commits",
+        "record",
+        "reopen_condition",
+        "decided_by",
+        "decided_on"
+      ],
+      "properties": {
+        "id": {"pattern": "^EXP-[0-9]{4}(?:-[A-Z])?$"},
+        "slug": {"type": "string", "minLength": 1},
+        "title": {"type": "string", "minLength": 1},
+        "parent": {"type": ["string", "null"]},
+        "variants": {"type": "array", "items": {"type": "string"}},
+        "execution_state": {
+          "enum": ["proposed", "approved", "running", "completed", "aborted"]
+        },
+        "evidence_validity": {
+          "enum": ["not_checked", "valid", "invalid", "inconclusive"]
+        },
+        "local_gate": {
+          "enum": ["not_run", "pass", "fail", "not_applicable"]
+        },
+        "adoption_status": {
+          "enum": ["pending", "accepted", "rejected", "superseded", "not_applicable"]
+        },
+        "evidence_profile": {
+          "enum": [
+            "micrograph-performance",
+            "full-model-performance",
+            "correctness-only",
+            "diagnostic"
+          ]
+        },
+        "source_branches": {"type": "array", "items": {"type": "string"}},
+        "source_commits": {"type": "array", "items": {"pattern": "^[0-9a-f]{7,40}$"}},
+        "record": {"type": "string"},
+        "supplemental_references": {"type": "array"},
+        "distinct_from": {"type": "array", "items": {"type": "string"}},
+        "hard_gate": {"type": "string"},
+        "approval_ref": {"type": "string"},
+        "decision_ref": {"type": "string"},
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source_worktree", "source_branch", "started_on"],
+          "properties": {
+            "source_worktree": {"type": "string"},
+            "source_branch": {"type": "string"},
+            "started_on": {"type": "string"}
+          }
+        },
+        "evidence": {"type": "array", "items": {"type": "string"}},
+        "abort_reason": {"type": "string"},
+        "reopen_condition": {"type": "string"},
+        "decided_by": {"type": "string"},
+        "decided_on": {"type": "string"}
+      }
+    }
+  }
+}

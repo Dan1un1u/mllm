@@ -1,0 +1,90 @@
+schema_version: 1
+project:
+  id: mllm-w4a8g32
+  repository_url: https://github.com/Dan1un1u/mllm.git
+  git_common_dir: /home/daniuniu/work/mllm-w4a8/.git
+  source_root: /home/daniuniu/work/mllm-w4a8
+  memory_branch: codex/w4a8g32-project-memory
+  memory_worktree: /home/daniuniu/work/mllm-w4a8-project-memory
+  updated_on: '2026-08-24'
+
+toolchain:
+  qairt_release: 2.49.0.260730
+  hardware: PJZ110
+  soc: SM8750
+  backend: QNN AOT
+  accelerator: HTP V79
+
+governance:
+  active_experiment: null
+  next_experiment_number: 14
+  maximum_running_experiments: 1
+  source_branch_pattern: 'codex/exp-<number>-<slug>'
+  sync_policy: fetch_and_fast_forward_only
+  stale_fallback_allowed: false
+
+roles:
+  archived_reference:
+    name: W4A16G32 QAIRT 2.47 archived reference
+    experiment: EXP-0001
+    source_commit: cfa58fed06e814e6a6034782d743f4ac5c676884
+    tag: reference/w4a16g32-qairt247-20260807
+    qairt_release: 2.47.0.260601
+    result_root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_g32_20260807_230410'
+    artifact_manifest_role: archived_reference
+    prefill_tokens_per_second: 859.9644917887261
+    decode_tokens_per_second: 45.48956519918292
+    sanity_passed: 77
+    sanity_total: 100
+
+  performance_comparator:
+    name: W4A16G32 QAIRT 2.49 default comparator
+    experiment: EXP-0007
+    artifact_source_commit: 462c9207f0a898ce24c1b869d67c70db10098b48
+    result_capture_commit: a49d078f35430a752fe8603bed6a061eba5a7c91
+    tag: comparator/w4a16g32-qairt249-default-20260822
+    qairt_release: 2.49.0.260730
+    result_root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a16_qairt249_default_20260822_223744'
+    artifact_manifest_role: performance_comparator
+    prefill_tokens_per_second: 835.9625704500714
+    decode_tokens_per_second: 46.67351211511021
+    sanity_passed: 77
+    sanity_total: 100
+
+  selected_w4a8_baseline:
+    name: W4A8G32 native U8 RMSNorm QAIRT 2.49 P19
+    experiment: EXP-0008
+    artifact_source_commit: a8a3dcd26f184f11bad4840650e9666cebbcc43b
+    selection_commit: 067bcea464d40c44060203712df1dbbd6d1da27b
+    source_branch: codex/w4a8g32-rmsnorm-u8-qairt249
+    tag: baseline/w4a8g32-rmsnorm-u8-qairt249-p19-20260823
+    qairt_release: 2.49.0.260730
+    result_root_windows: 'D:\llm_exp\results\qwen3_sm8750_v79_w4a8_rmsnorm_u8_qairt249_p19_20260823_132031'
+    artifact_manifest_role: selected_w4a8_baseline
+    prefill_tokens_per_second: 783.83777086652
+    decode_tokens_per_second: 45.31288547419935
+    sanity_passed: 0
+    sanity_total: 100
+    sanity_gate: informational_only
+
+performance_snapshot:
+  comparison: selected_w4a8_baseline_vs_performance_comparator
+  prefill_percent: -6.235303041796247
+  decode_percent: -2.9152008907218585
+  primary_optimization_track: prefill
+  decode_policy: monitor_regressions
+  approved_next_hypothesis: null
+
+closed_families:
+  - experiment: EXP-0003
+    name: LPBQ FullyConnected and MatMul MLP lowering
+  - experiment: EXP-0004
+    name: MLP zero-bias and symmetric output-channel split controls
+  - experiment: EXP-0009
+    name: Custom Softmax optimization
+  - experiment: EXP-0010
+    name: Compact attention and compact initial prefill
+  - experiment: EXP-0011
+    name: Output pruning
+  - experiment: EXP-0012
+    name: K/V head packing and P-schedule
