@@ -107,3 +107,16 @@ processing and cache assembly, performs score computation, scaling, masking,
 normalization, and value aggregation within one fusion boundary, and produces
 that group's Attention outputs.
 _Avoid_: fused Softmax, full Attention layer, QKV projection
+
+**Core-Internal Zero DRAM**:
+An evidence condition in which all dynamic intermediates and workspace inside
+a fused core incur zero DRAM reads and writes. Normal input and output boundary
+transfers are excluded from this attribution but remain part of fair wall-time
+comparison.
+_Avoid_: whole-graph zero DRAM, zero cache traffic
+
+**Equivalent-Scope Wall Latency**:
+Device-measured elapsed time for a Candidate and its reference using identical
+functional boundaries, input placement, output placement, and measurement
+protocol. It is the primary local performance gate.
+_Avoid_: work cycles, active cycles, fastest single run
