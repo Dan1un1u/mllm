@@ -41,7 +41,11 @@ for graph in s1 s32; do
     exit 2
   }
 done
-[[ ! -e "${work_root}" ]] || { echo "work root already exists: ${work_root}" >&2; exit 2; }
+resume_completed="${RESUME_COMPLETED_BUILD:-0}"
+if [[ -e "${work_root}" && "${resume_completed}" != 1 ]]; then
+  echo "work root already exists: ${work_root}" >&2
+  exit 2
+fi
 [[ ! -e "${publish_root}" ]] || { echo "publish root already exists: ${publish_root}" >&2; exit 2; }
 [[ -z "$(git -C "${repo_root}" status --porcelain=v1)" ]] || {
   echo "refusing a formal regression build from a dirty Git worktree" >&2
@@ -52,24 +56,37 @@ manifest_dir="${work_root}/manifests"
 schematic_dir="${work_root}/schematics"
 context="${work_root}/context.bin"
 compile_log="${work_root}/compile.log"
-mkdir -p "${manifest_dir}" "${schematic_dir}"
-
-export LD_LIBRARY_PATH="$(dirname "${compiler}"):${qnn_lib}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-export MLLM_QNN_AOT_QUANT_MANIFEST_DIR="${manifest_dir}"
-export MLLM_QNN_AOT_OPTRACE=1
-export MLLM_QNN_AOT_OPTRACE_DIR="${schematic_dir}"
-unset MLLM_QNN_AOT_FINALIZE_P MLLM_QNN_AOT_FINALIZE_P_S1 MLLM_QNN_AOT_FINALIZE_P_S32
-
-(
-  cd "${work_root}"
-  "${compiler}" \
-    -m "${source_model}" \
-    -c "${config}" \
-    -aot_cfg "${aot_config}" \
-    -qnn_env "${qnn_lib}/" \
-    --prefill_seq 32 \
-    -o "${context}"
-) >"${compile_log}" 2>&1
+if [[ "${resume_completed}" == 1 ]]; then
+  resolved_work="$(realpath -e "${work_root}")"
+  [[ "${resolved_work}" == "/home/daniuniu/llm_exp_work/qwen3_sm8750_v79/g32/w4a16_current_regression_qairt249_20260824" ]] || {
+    echo "refusing unexpected resume work root: ${resolved_work}" >&2
+    exit 2
+  }
+  for path in "${context}" "${compile_log}" \
+    "${manifest_dir}/model.0.s1_quant_manifest.json" \
+    "${manifest_dir}/model.0.s32_quant_manifest.json" \
+    "${schematic_dir}/model.0.s1_schematic.bin" \
+    "${schematic_dir}/model.0.s32_schematic.bin"; do
+    [[ -s "${path}" ]] || { echo "completed-build resume input missing: ${path}" >&2; exit 2; }
+  done
+else
+  mkdir -p "${manifest_dir}" "${schematic_dir}"
+  export LD_LIBRARY_PATH="$(dirname "${compiler}"):${qnn_lib}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+  export MLLM_QNN_AOT_QUANT_MANIFEST_DIR="${manifest_dir}"
+  export MLLM_QNN_AOT_OPTRACE=1
+  export MLLM_QNN_AOT_OPTRACE_DIR="${schematic_dir}"
+  unset MLLM_QNN_AOT_FINALIZE_P MLLM_QNN_AOT_FINALIZE_P_S1 MLLM_QNN_AOT_FINALIZE_P_S32
+  (
+    cd "${work_root}"
+    "${compiler}" \
+      -m "${source_model}" \
+      -c "${config}" \
+      -aot_cfg "${aot_config}" \
+      -qnn_env "${qnn_lib}/" \
+      --prefill_seq 32 \
+      -o "${context}"
+  ) >"${compile_log}" 2>&1
+fi
 
 [[ -s "${context}" ]] || { echo "context was not generated" >&2; exit 1; }
 if grep -q "with init graph option: P =" "${compile_log}"; then
@@ -83,9 +100,11 @@ for graph in s1 s32; do
     echo "missing ${graph} manifest or schematic" >&2
     exit 1
   }
-  python3 "${repo_root}/scripts/qnn_quant_manifest_equivalent.py" \
+  python3 "${repo_root}/scripts/qnn_w4a16_manifest_regression.py" \
     "${reference_root}/manifests/model.0.${graph}_quant_manifest.json" \
-    "${manifest}" >"${manifest_dir}/model.0.${graph}_reference-equivalence.txt"
+    "${manifest}" \
+    --output "${manifest_dir}/model.0.${graph}_reference-equivalence.json" \
+    >"${manifest_dir}/model.0.${graph}_reference-equivalence.log"
 done
 
 publish="${publish_root}.tmp.$$"
@@ -116,7 +135,7 @@ aot_config=${aot_config}
 aot_config_sha256=$(sha256sum "${aot_config}" | awk '{print $1}')
 graph_contract=legacy full-width s1/s32 W4A16G32
 reference_result=${reference_result}
-reference_manifests=canonical-equivalent
+reference_manifests=canonical-equivalent after isolating exact-zero synthetic RmsNorm bias scale metadata
 EOF
 
 cat >"${publish}/profile-contract.env" <<EOF
