@@ -381,7 +381,7 @@ experiments:
   title: QHPI in-graph U8xS8 HMX feasibility gate
   parent: null
   variants: []
-  execution_state: proposed
+  execution_state: approved
   evidence_validity: not_checked
   local_gate: not_run
   adoption_status: pending
@@ -401,5 +401,6 @@ experiments:
     match the independent asymmetric integer reference exactly or within a predeclared
     one-LSB tolerance. Any failure stops before fused attention.
   reopen_condition: not_applicable
-  decided_by: pending
+  decided_by: user
   decided_on: '2026-08-24'
+  approval_ref: 'User message 2026-08-24: 同意。尝试一下这个路线'
