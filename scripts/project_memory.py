@@ -140,10 +140,15 @@ def git_common_dir(worktree: Path) -> Path:
     return path.resolve()
 
 
-def git_branch(worktree: Path) -> str:
+def git_branch(worktree: Path, *, allow_detached: bool = False) -> str:
     proc = git(["symbolic-ref", "--quiet", "--short", "HEAD"],
                cwd=worktree, check=False)
     if proc.returncode != 0:
+        if allow_detached:
+            short_head = git(
+                ["rev-parse", "--short=12", "HEAD"], cwd=worktree
+            ).stdout.strip()
+            return f"DETACHED@{short_head}"
         raise ValidationFailure(f"{worktree} is detached or has no branch")
     return proc.stdout.strip()
 
@@ -607,7 +612,8 @@ def find_experiment(index: dict[str, Any], exp_id: str) -> dict[str, Any]:
 
 def validate_source_worktree(source: Path, *,
                              experiment: dict[str, Any] | None = None,
-                             require_clean: bool = True) -> dict[str, str]:
+                             require_clean: bool = True,
+                             allow_detached: bool = False) -> dict[str, str]:
     source = source.resolve()
     if not source.is_dir():
         raise ValidationFailure(f"source worktree does not exist: {source}")
@@ -626,7 +632,7 @@ def validate_source_worktree(source: Path, *,
         dirty = git_dirty(source)
         if dirty:
             raise ValidationFailure(f"source worktree is dirty: {dirty[:5]}")
-    branch = git_branch(source)
+    branch = git_branch(source, allow_detached=allow_detached)
     head = git_head(source)
     clean_root = resolve_commit(EXPECTED_CLEAN_ROOM_ROOT)
     if clean_root is None or not is_ancestor(clean_root, head):
@@ -664,7 +670,9 @@ def print_brief(source_worktree: Path | None = None) -> None:
     ]
     print(f"REJECTED_FAMILIES={','.join(rejected)}")
     if source_worktree is not None:
-        info = validate_source_worktree(source_worktree, require_clean=False)
+        info = validate_source_worktree(
+            source_worktree, require_clean=False, allow_detached=True
+        )
         print(f"SOURCE_WORKTREE={info['path']}")
         print(f"SOURCE_BRANCH={info['branch']}")
         print(f"SOURCE_HEAD={info['head']}")
