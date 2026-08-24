@@ -92,5 +92,13 @@ class SchemaTests(unittest.TestCase):
         self.assertTrue(any("local_gate" in item for item in errors))
 
 
+class RemoteReferenceTests(unittest.TestCase):
+    def test_required_refs_include_memory_and_completed_source_branches(self) -> None:
+        branches = pm.required_remote_branches()
+        self.assertIn(pm.EXPECTED_MEMORY_BRANCH, branches)
+        self.assertIn("codex/w4a8g32-rmsnorm-u8-qairt249", branches)
+        self.assertEqual(branches, sorted(set(branches)))
+
+
 if __name__ == "__main__":
     unittest.main()

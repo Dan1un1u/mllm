@@ -47,7 +47,8 @@ python3 "$MEMORY_WORKTREE/scripts/project_memory.py" validate ||
     hard_stop "quick validation failed"
 
 if [[ -n "$SOURCE_WORKTREE" ]]; then
-    python3 "$MEMORY_WORKTREE/scripts/project_memory.py" brief +        --source-worktree "$SOURCE_WORKTREE" ||
+    python3 "$MEMORY_WORKTREE/scripts/project_memory.py" brief \
+        --source-worktree "$SOURCE_WORKTREE" ||
         hard_stop "source identity check failed"
 else
     python3 "$MEMORY_WORKTREE/scripts/project_memory.py" brief ||

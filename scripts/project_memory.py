@@ -240,6 +240,36 @@ def remote_tags() -> dict[str, tuple[str, str | None]]:
     return {tag: (object_id, peeled.get(tag)) for tag, object_id in raw.items()}
 
 
+def required_remote_branches() -> list[str]:
+    status = load_yaml(STATUS_PATH)
+    index = load_yaml(INDEX_PATH)
+    branches = {status["project"]["memory_branch"]}
+    for experiment in index["experiments"]:
+        if experiment["execution_state"] == "completed":
+            branches.update(experiment["source_branches"])
+    return sorted(branches)
+
+
+def sync_required_refs() -> None:
+    branches = required_remote_branches()
+    refspecs = [
+        f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
+        for branch in branches
+    ]
+    run(["git", "fetch", "--no-tags", "origin", *refspecs], cwd=ROOT, timeout=300)
+    remote = remote_heads()
+    problems = []
+    for branch in branches:
+        remote_tip = remote.get(branch)
+        tracked_tip = ref_commit(f"refs/remotes/origin/{branch}")
+        if remote_tip is None:
+            problems.append(f"required branch is absent from origin: {branch}")
+        elif tracked_tip != remote_tip:
+            problems.append(f"explicit fetch did not synchronize: {branch}")
+    if problems:
+        raise ValidationFailure("; ".join(problems))
+
+
 class ProjectValidator:
     def __init__(self, *, full: bool = False, require_clean: bool = True):
         self.full = full
@@ -846,6 +876,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     validation = subparsers.add_parser("validate")
     validation.add_argument("--full", action="store_true")
+    subparsers.add_parser("sync-refs")
     brief = subparsers.add_parser("brief")
     brief.add_argument("--source-worktree", type=Path)
     pre = subparsers.add_parser("preflight")
@@ -893,8 +924,14 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = build_parser().parse_args(list(argv) if argv is not None else None)
     try:
         if args.command == "validate":
+            if args.full:
+                sync_required_refs()
             validate(full=args.full, require_clean=True)
             print(f"VALIDATION=pass mode={'full' if args.full else 'quick'}")
+        elif args.command == "sync-refs":
+            validate(full=False, require_clean=True)
+            sync_required_refs()
+            print("REFERENCE_SYNC=pass")
         elif args.command == "brief":
             validate(full=False, require_clean=True)
             print_brief(args.source_worktree)
