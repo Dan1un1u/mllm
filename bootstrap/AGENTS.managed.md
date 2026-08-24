@@ -1,3 +1,5 @@
+# BEGIN MLLM-W4A8 PROJECT-MEMORY MANAGED BLOCK
+
 # mllm W4A8 project-memory bootstrap
 
 For any task in a Git worktree whose common directory is
@@ -18,3 +20,5 @@ https://github.com/Dan1un1u/mllm.git:
 5. Never inspect Legacy W4A8-specific work identified by EXCLUDED-001.
 6. Never auto-stash, reset, clean, clear a lock, force-push, rewrite history,
    delete a tag, accept a new artifact hash, or downgrade required evidence.
+
+# END MLLM-W4A8 PROJECT-MEMORY MANAGED BLOCK
