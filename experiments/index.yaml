@@ -161,7 +161,8 @@ experiments:
   slug: qairt249-native-u8-rmsnorm-baseline
   title: QAIRT 2.49 native U8 RMSNorm baseline migration
   parent: null
-  variants: []
+  variants:
+  - EXP-0017
   execution_state: completed
   evidence_validity: valid
   local_gate: pass
@@ -491,3 +492,32 @@ experiments:
   - /mnt/d/llm_exp/models/exp0016_qhpi_sequential_hmx_gqa_core/20260825-stage-a
   - /mnt/d/llm_exp/models/exp0016_qhpi_sequential_hmx_gqa_core/20260825-stage-b
   decision_ref: 'User message 2026-08-25: 看来这个方向也不可行。'
+- id: EXP-0017
+  slug: native-u8-group-query-attention
+  title: Native U8 GroupQueryAttention lowering
+  parent: EXP-0008
+  variants: []
+  execution_state: proposed
+  evidence_validity: not_checked
+  local_gate: not_run
+  adoption_status: pending
+  evidence_profile: micrograph-performance
+  source_branches:
+  - codex/exp-0017-native-u8-group-query-attention
+  source_commits: []
+  record: docs/experiments/EXP-0017.md
+  distinct_from:
+  - EXP-0009
+  - EXP-0012
+  - EXP-0016
+  hard_gate: On PJZ110, for layer 14, s32/context-1024, the candidate must compile
+    and lower as native U8 GroupQueryAttention on HTP without CPU fallback or graph
+    split, preserve valid shape/cache/causal semantics, and achieve median end-to-end
+    device wall latency no greater than the current decomposed native attention over
+    the exact same external boundary with all required layout/cache transformations
+    included. Report local error against both current W4A8 and W4A16 references; error
+    is diagnostic unless semantics are invalid. If the speed gate fails, stop before
+    layer or full-model integration.
+  reopen_condition: not_applicable
+  decided_by: pending
+  decided_on: '2026-08-25'
