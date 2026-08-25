@@ -537,7 +537,7 @@ experiments:
   title: Deployment-faithful progressive A8 activation calibration
   parent: EXP-0008
   variants: []
-  execution_state: approved
+  execution_state: running
   evidence_validity: not_checked
   local_gate: not_run
   adoption_status: pending
@@ -558,3 +558,7 @@ experiments:
   decided_by: user
   decided_on: '2026-08-25'
   approval_ref: 'User message 2026-08-25: 允许，继续已提议的 EXP-0018。'
+  runtime:
+    source_worktree: /home/daniuniu/work/mllm-w4a8
+    source_branch: codex/exp-0018-deployment-faithful-a8-calibration
+    started_on: '2026-08-25'
