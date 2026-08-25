@@ -497,7 +497,7 @@ experiments:
   title: Native U8 GroupQueryAttention lowering
   parent: EXP-0008
   variants: []
-  execution_state: approved
+  execution_state: running
   evidence_validity: not_checked
   local_gate: not_run
   adoption_status: pending
@@ -522,3 +522,7 @@ experiments:
   decided_by: user
   decided_on: '2026-08-25'
   approval_ref: 'User message 2026-08-25: 同意建议'
+  runtime:
+    source_worktree: /home/daniuniu/work/mllm-w4a8
+    source_branch: codex/exp-0017-native-u8-group-query-attention
+    started_on: '2026-08-25'
