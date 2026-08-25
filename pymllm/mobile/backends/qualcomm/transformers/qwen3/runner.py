@@ -21,6 +21,9 @@ from pymllm.mobile.backends.qualcomm.transformers.qwen3.modeling_qwen3 import Qw
 from pymllm.mobile.backends.qualcomm.transformers.core.observer import ConcatObserver
 
 
+CALIBRATION_MODES = ("legacy_minmax", "deployment_minmax")
+
+
 def recompute_scale_zp(module):
     """
     Callback function: Used to forcefully refresh scale and zero_point of all FakeQuantize modules after calibration.
@@ -179,6 +182,17 @@ def enable_fake_quant(m):
         m.enable_fakequant()
 
 
+def disable_dynamic_activation_fake_quant(m):
+    """Disable only observer-backed activation QDQ simulation.
+
+    During PTQ calibration these QDQ modules do not have usable qparams yet, so
+    they must act as observers rather than quantizers.  Fixed activation QDQ and
+    already-frozen weights deliberately remain quantized to match deployment.
+    """
+    if isinstance(m, ActivationQDQ):
+        m.disable_fakequant()
+
+
 def disable_fake_quant(m):
     if isinstance(m, ActivationQDQ) or isinstance(m, FixedActivationQDQ):
         m.disable_fakequant()
@@ -188,6 +202,81 @@ def disable_fake_quant(m):
         m.disable_fakequant()
     if isinstance(m, QEmbedding):
         m.disable_fakequant()
+
+
+def _enabled_flag(value) -> bool:
+    if isinstance(value, torch.Tensor):
+        return bool(value.detach().reshape(-1)[0].item())
+    return bool(value)
+
+
+def calibration_fake_quant_state(model) -> dict[str, dict[str, int]]:
+    """Return a compact audit of the fake-quant state used for calibration."""
+    state = {
+        "dynamic_activation": {"enabled": 0, "disabled": 0},
+        "fixed_activation": {"enabled": 0, "disabled": 0},
+        "lpbq_weight": {"enabled": 0, "disabled": 0},
+        "rmsnorm_weight": {"enabled": 0, "disabled": 0},
+        "embedding_weight": {"enabled": 0, "disabled": 0},
+    }
+    for module in model.modules():
+        category = None
+        flag = None
+        if isinstance(module, ActivationQDQ):
+            category = "dynamic_activation"
+            flag = module.fake_quant.fake_quant_enabled
+        elif isinstance(module, FixedActivationQDQ):
+            category = "fixed_activation"
+            flag = module.fake_quant.fake_quant_enabled
+        elif isinstance(module, QLinearLPBQ):
+            category = "lpbq_weight"
+            flag = module.weight_quant.fake_quant_enabled
+        elif isinstance(module, QRMSNorm):
+            category = "rmsnorm_weight"
+            flag = module.weight_fake_quant.fake_quant_enabled
+        elif isinstance(module, QEmbedding):
+            category = "embedding_weight"
+            flag = module.weight_fake_quant.fake_quant_enabled
+        if category is not None:
+            key = "enabled" if _enabled_flag(flag) else "disabled"
+            state[category][key] += 1
+    return state
+
+
+def configure_calibration_fake_quant(model, mode: str) -> dict[str, dict[str, int]]:
+    """Configure either the archived or deployment-faithful calibration state."""
+    if mode not in CALIBRATION_MODES:
+        raise ValueError(f"Unsupported calibration mode: {mode}")
+
+    if mode == "legacy_minmax":
+        model.apply(disable_fake_quant)
+    else:
+        # Start from a known all-enabled state, then suppress only dynamic
+        # activation QDQ until its observers have collected valid ranges.
+        model.apply(enable_fake_quant)
+        model.apply(disable_dynamic_activation_fake_quant)
+
+    state = calibration_fake_quant_state(model)
+    if mode == "deployment_minmax":
+        errors = []
+        dynamic = state["dynamic_activation"]
+        if dynamic["enabled"] or not dynamic["disabled"]:
+            errors.append(f"dynamic_activation={dynamic}")
+        for category in (
+            "fixed_activation",
+            "lpbq_weight",
+            "rmsnorm_weight",
+            "embedding_weight",
+        ):
+            counts = state[category]
+            if counts["disabled"] or not counts["enabled"]:
+                errors.append(f"{category}={counts}")
+        if errors:
+            raise RuntimeError(
+                "Deployment-faithful calibration state is invalid: "
+                + ", ".join(errors)
+            )
+    return state
 
 
 def convert_weight(m):
@@ -359,14 +448,32 @@ class Qwen3Quantizer:
         print(f"Captured calibration corpus: {output} sha256={digest}")
         return digest
 
-    def calibrate(self, calibration_corpus: str, num_samples=128, max_seq_length=512):
+    def calibrate(
+        self,
+        calibration_corpus: str,
+        num_samples=128,
+        max_seq_length=512,
+        calibration_mode: str = "deployment_minmax",
+    ):
         """
         Perform calibration using Wikipedia dataset (PTQ)
         :param num_samples: Number of samples for calibration
         :param max_seq_length: Maximum length for each sample (not exceeding mllm_qualcomm_max_length)
         """
         print(
-            f"Starting calibration, samples: {num_samples}, max length: {max_seq_length}"
+            f"Starting calibration, samples: {num_samples}, max length: {max_seq_length}, "
+            f"mode: {calibration_mode}"
+        )
+
+        # Dynamic activation QDQ observes in floating point.  In deployment
+        # mode all frozen weights and fixed-domain activation QDQ remain active,
+        # so downstream observers see the same upstream model used at runtime.
+        calibration_state = configure_calibration_fake_quant(
+            self.model, calibration_mode
+        )
+        print(
+            "Calibration fake-quant state: "
+            + json.dumps(calibration_state, sort_keys=True)
         )
 
         # 1. Enable QDQ Observer for activation values
@@ -411,9 +518,15 @@ class Qwen3Quantizer:
                 samples_processed += 1
                 pbar.update(1)
 
-        # 4. Close Observer, freeze calibrated quantization parameters
+        # 4. Close observers, commit their final qparams, then enable the full
+        # deployment fake-quant contract for the software correctness gate.
         self.freeze_activation()
-        print("\nCalibration completed, activation quantization parameters frozen.")
+        self.recompute_scale_zp()
+        self.enable_fake_quant()
+        print(
+            "\nCalibration completed, activation quantization parameters frozen "
+            "and deployment fake quantization enabled."
+        )
 
     def convert(self):
         self.model.apply(convert_weight)

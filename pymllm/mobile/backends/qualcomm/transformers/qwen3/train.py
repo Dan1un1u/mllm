@@ -35,6 +35,15 @@ def main():
     parser.add_argument("--activation_bits", type=int, choices=(8, 16), default=8)
     parser.add_argument("--linear_block_size", type=int, default=32)
     parser.add_argument(
+        "--calibration_mode",
+        choices=("legacy_minmax", "deployment_minmax"),
+        default="deployment_minmax",
+        help=(
+            "legacy_minmax disables every fake quantizer while observing; "
+            "deployment_minmax keeps frozen weights and fixed QDQ active"
+        ),
+    )
+    parser.add_argument(
         "--infer_text",
         type=str,
         default="为什么伟大不能被计划",
@@ -72,14 +81,12 @@ def main():
             num_samples=args.num_samples,
             max_seq_length=args.max_length,
         )
-    m.disable_fake_quant()
     m.calibrate(
         args.calibration_corpus,
         num_samples=args.num_samples,
         max_seq_length=args.max_length,
+        calibration_mode=args.calibration_mode,
     )
-    m.enable_fake_quant()
-    m.recompute_scale_zp()
     m.validate_concat_observer()
     m.infer(args.infer_text, max_new_tokens=args.infer_max_new_tokens)
     m.convert()
