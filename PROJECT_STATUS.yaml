@@ -15,7 +15,7 @@ toolchain:
   accelerator: HTP V79
 governance:
   active_experiment: null
-  next_experiment_number: 16
+  next_experiment_number: 17
   maximum_running_experiments: 1
   source_branch_pattern: codex/exp-<number>-<slug>
   sync_policy: fetch_and_fast_forward_only

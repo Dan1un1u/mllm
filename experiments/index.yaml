@@ -416,7 +416,8 @@ experiments:
   slug: qhpi-fused-gqa-core
   title: QHPI fused GQA QK-Softmax-AV core
   parent: null
-  variants: []
+  variants:
+  - EXP-0016
   execution_state: completed
   evidence_validity: valid
   local_gate: fail
@@ -452,3 +453,30 @@ experiments:
   evidence:
   - /mnt/d/llm_exp/results/exp0015_qhpi_fused_gqa_core_20260825
   - /mnt/d/llm_exp/models/exp0015_qhpi_fused_gqa_core/20260825-stage-a
+- id: EXP-0016
+  slug: qhpi-sequential-hmx-gqa-core
+  title: QHPI sequential HMX-HVX-HMX GQA core
+  parent: EXP-0015
+  variants: []
+  execution_state: proposed
+  evidence_validity: not_checked
+  local_gate: not_run
+  adoption_status: pending
+  evidence_profile: micrograph-performance
+  source_branches:
+  - codex/exp-0016-qhpi-sequential-hmx-gqa-core
+  source_commits: []
+  record: docs/experiments/EXP-0016.md
+  distinct_from:
+  - EXP-0009
+  - EXP-0014
+  hard_gate: Stage A must execute one in-graph sequential HMX-HVX-HMX QHPI_RESOURCE_HMX
+    node on PJZ110 with byte-exact device output, true integer-HMX evidence, custom-core
+    DRAM read-write 0-0, context ddrTensorSize 0, no spill-fill, fallback, or graph
+    split. Any Stage A failure stops before GQA. Only after Stage A passes may Stage
+    B implement the same layer-14 s32 context-1024 one-group GQA scope as EXP-0015,
+    whose equivalent-scope median device wall latency must be no slower than native
+    before expansion.
+  reopen_condition: not_applicable
+  decided_by: pending
+  decided_on: '2026-08-25'
