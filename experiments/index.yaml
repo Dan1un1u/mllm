@@ -537,7 +537,7 @@ experiments:
   title: Deployment-faithful progressive A8 activation calibration
   parent: EXP-0008
   variants: []
-  execution_state: proposed
+  execution_state: approved
   evidence_validity: not_checked
   local_gate: not_run
   adoption_status: pending
@@ -555,5 +555,6 @@ experiments:
     W4G32/asymmetric-U8/native-U8-RMSNorm runtime contract. If this software gate
     fails, stop before QNN build and record the failed calibration variant.
   reopen_condition: not_applicable
-  decided_by: pending
+  decided_by: user
   decided_on: '2026-08-25'
+  approval_ref: 'User message 2026-08-25: 允许，继续已提议的 EXP-0018。'
