@@ -17,5 +17,9 @@ export ADB_BIN="${ADB_BIN:-/mnt/c/adb/adb.exe}"
 export ADB_SERIAL="${ADB_SERIAL:-3B15C8007Z300000}"
 export REMOTE_DIR="${REMOTE_DIR:-/data/local/tmp/mllm_exp0018_progressive_a8}"
 export PROFILE_WRAPPER="${BASH_SOURCE[0]}"
+# qnn-profile-viewer expands the trace into hundreds of megabytes of small
+# JSON writes.  Keep that work on WSL ext4 and let the canonical profiler copy
+# only completed artifacts to the contracted D: result directory.
+export PROFILE_WORK_ROOT="${PROFILE_WORK_ROOT:-/home/daniuniu/llm_exp_work/profiling/exp0018_progressive_a8_qairt249_p19}"
 
 exec "${script_dir}/run_qwen3_sm8750_v79_g32_profile.sh"
