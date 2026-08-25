@@ -537,14 +537,15 @@ experiments:
   title: Deployment-faithful progressive A8 activation calibration
   parent: EXP-0008
   variants: []
-  execution_state: running
-  evidence_validity: not_checked
-  local_gate: not_run
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: pass
   adoption_status: pending
   evidence_profile: full-model-performance
   source_branches:
   - codex/exp-0018-deployment-faithful-a8-calibration
-  source_commits: []
+  source_commits:
+  - 421541f7492bd0d6dc40a2ec6030583e0b04a3e6
   record: docs/experiments/EXP-0018.md
   distinct_from:
   - EXP-0001
@@ -562,3 +563,7 @@ experiments:
     source_worktree: /home/daniuniu/work/mllm-w4a8
     source_branch: codex/exp-0018-deployment-faithful-a8-calibration
     started_on: '2026-08-25'
+  evidence:
+  - /mnt/d/llm_exp/results/exp0018_deployment_calibration_20260825/progressive_block_calibration_after_l0_l1_mlp_v5
+  - /mnt/d/llm_exp/models/qwen3_sm8750_v79/g32/exp0018_progressive_calibration/20260825_210900
+  - /mnt/d/llm_exp/results/exp0018_progressive_a8_qairt249_p19_20260825_213541
