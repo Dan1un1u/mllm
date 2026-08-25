@@ -163,6 +163,7 @@ experiments:
   parent: null
   variants:
   - EXP-0017
+  - EXP-0018
   execution_state: completed
   evidence_validity: valid
   local_gate: pass
@@ -531,3 +532,28 @@ experiments:
   - /mnt/d/llm_exp/results/exp0017_native_u8_group_query_attention_20260825
   - /mnt/d/llm_exp/models/exp0017_native_u8_group_query_attention/20260825-probes
   decision_ref: 'User message 2026-08-25: 又失败了，登记为rejected。'
+- id: EXP-0018
+  slug: deployment-faithful-a8-calibration
+  title: Deployment-faithful progressive A8 activation calibration
+  parent: EXP-0008
+  variants: []
+  execution_state: proposed
+  evidence_validity: not_checked
+  local_gate: not_run
+  adoption_status: pending
+  evidence_profile: full-model-performance
+  source_branches:
+  - codex/exp-0018-deployment-faithful-a8-calibration
+  source_commits: []
+  record: docs/experiments/EXP-0018.md
+  distinct_from:
+  - EXP-0001
+  hard_gate: Before any formal QNN model generation, the pinned PyTorch fake-quant
+    sanity must stop producing empty or repeated-punctuation degeneration, layer-2
+    post-block reconstruction versus W4A16 must improve over the selected A8 baseline
+    without moving the first catastrophic cliff earlier, and an audit must show unchanged
+    W4G32/asymmetric-U8/native-U8-RMSNorm runtime contract. If this software gate
+    fails, stop before QNN build and record the failed calibration variant.
+  reopen_condition: not_applicable
+  decided_by: pending
+  decided_on: '2026-08-25'
