@@ -497,7 +497,7 @@ experiments:
   title: Native U8 GroupQueryAttention lowering
   parent: EXP-0008
   variants: []
-  execution_state: proposed
+  execution_state: approved
   evidence_validity: not_checked
   local_gate: not_run
   adoption_status: pending
@@ -519,5 +519,6 @@ experiments:
     is diagnostic unless semantics are invalid. If the speed gate fails, stop before
     layer or full-model integration.
   reopen_condition: not_applicable
-  decided_by: pending
+  decided_by: user
   decided_on: '2026-08-25'
+  approval_ref: 'User message 2026-08-25: 同意建议'
