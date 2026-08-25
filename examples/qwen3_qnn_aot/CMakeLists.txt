@@ -27,6 +27,10 @@ if(MLLM_QUALCOMM_QNN_AOT_ON_X86_ENABLE)
   add_executable(mllm-qwen3-lpbq-a16-a8-projection-c compile_lpbq_a16_a8_projection.cpp)
   target_link_libraries(mllm-qwen3-lpbq-a16-a8-projection-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
   target_include_directories(mllm-qwen3-lpbq-a16-a8-projection-c PRIVATE ${MLLM_INCLUDE_DIR})
+
+  add_executable(mllm-exp0017-native-u8-gqa-c compile_native_u8_group_query_attention.cpp)
+  target_link_libraries(mllm-exp0017-native-u8-gqa-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+  target_include_directories(mllm-exp0017-native-u8-gqa-c PRIVATE ${MLLM_INCLUDE_DIR})
 endif()
 
 add_executable(mllm-qwen3-aot-runner aot_run.cpp)
@@ -36,3 +40,7 @@ target_include_directories(mllm-qwen3-aot-runner PRIVATE ${MLLM_INCLUDE_DIR})
 add_executable(mllm-qwen3-lpbq-a16-a8-projection-runner run_lpbq_a16_a8_projection.cpp)
 target_link_libraries(mllm-qwen3-lpbq-a16-a8-projection-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
 target_include_directories(mllm-qwen3-lpbq-a16-a8-projection-runner PRIVATE ${MLLM_INCLUDE_DIR})
+
+add_executable(mllm-exp0017-native-u8-gqa-runner run_native_u8_group_query_attention.cpp)
+target_link_libraries(mllm-exp0017-native-u8-gqa-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+target_include_directories(mllm-exp0017-native-u8-gqa-runner PRIVATE ${MLLM_INCLUDE_DIR})

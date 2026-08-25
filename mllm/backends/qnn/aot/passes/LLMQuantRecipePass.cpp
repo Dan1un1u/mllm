@@ -14,6 +14,7 @@
 #include "mllm/compile/ir/linalg/Attribute.hpp"
 #include "mllm/backends/qnn/aot/passes/AOTCompileContext.hpp"
 #include "mllm/backends/qnn/aot/passes/LLMQuantRecipePass.hpp"
+#include "mllm/backends/base/PluginInterface.hpp"
 
 namespace mllm::qnn::aot {
 
@@ -1134,6 +1135,48 @@ bool LLMQuantRecipeQwen3AttentionPattern::rewrite(ir::IRWriter& writer, const ir
 }
 
 //===----------------------------------------------------------------------===//
+// EXP-0017 native GroupQueryAttention marker
+//===----------------------------------------------------------------------===//
+bool LLMQuantRecipeNativeGroupQueryAttentionPattern::isMatch(const mllm::ir::op_ptr_t& op) {
+  auto customized = op->cast_<ir::linalg::CustomizedOp>();
+  if (!customized) return false;
+  auto* custom_op = dynamic_cast<mllm::plugin::interface::CustomizedOp*>(customized->getAOp());
+  return custom_op != nullptr
+         && custom_op->getCustomOpTypeName() == "EXP0017NativeGroupQueryAttention";
+}
+
+bool LLMQuantRecipeNativeGroupQueryAttentionPattern::rewrite(ir::IRWriter& writer,
+                                                              const ir::op_ptr_t& node) {
+  auto customized = node->cast_<ir::linalg::CustomizedOp>();
+  if (!customized || (node->inputs().size() != 7 && node->inputs().size() != 10)
+      || node->outputs().size() != 3) {
+    return false;
+  }
+
+  auto annotation = writer.create<ir::linalg::LinalgIRQuantizatonAnnotationAttr>();
+  for (auto& input_value : node->inputs()) {
+    auto input = input_value->cast_<ir::tensor::TensorValue>();
+    MLLM_RETURN_FALSE_IF_NOT(input);
+    if (!input->getAttr("quant_recipe")) {
+      input->setAttr("quant_recipe", genSimpleQuantizationSpecAttr(writer.getContext(), input));
+    }
+    annotation->annotation_.inputs.emplace_back(
+        input->getAttr("quant_recipe")->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_);
+  }
+  for (auto& output_value : node->outputs()) {
+    auto output = output_value->cast_<ir::tensor::TensorValue>();
+    MLLM_RETURN_FALSE_IF_NOT(output);
+    if (!output->getAttr("quant_recipe")) {
+      output->setAttr("quant_recipe", genSimpleQuantizationSpecAttr(writer.getContext(), output));
+    }
+    annotation->annotation_.outputs.emplace_back(
+        output->getAttr("quant_recipe")->cast_<ir::linalg::LinalgIRQuantizatonSpecAttr>()->spec_);
+  }
+  node->setAttr("quant_recipe", annotation);
+  return true;
+}
+
+//===----------------------------------------------------------------------===//
 // LLMQuantRecipePass
 //===----------------------------------------------------------------------===//
 LLMQuantRecipePass::LLMQuantRecipePass() {
@@ -1161,6 +1204,7 @@ LLMQuantRecipePass::LLMQuantRecipePass() {
   addPattern(LLMQuantRecipeEmbeddingPattern::create(), "embedding", 0);
   addPattern(LLMQuantRecipeViewPattern::create(), "view", 0);
   addPattern(LLMQuantRecipeGatherPattern::create(), "gather", 0);
+  addPattern(LLMQuantRecipeNativeGroupQueryAttentionPattern::create(), "exp0017_native_gqa", 0);
 }
 
 uint8_t LLMQuantRecipePass::run(const ir::node_ptr_t& op) {

@@ -338,6 +338,18 @@ class LLMQuantRecipeQwen3AttentionPattern : public ir::Pattern {
   }
 };
 
+// EXP-0017 native GroupQueryAttention marker. This supplies the tensor
+// quantization annotation required by AOT lowering without changing qparams.
+class LLMQuantRecipeNativeGroupQueryAttentionPattern : public ir::Pattern {
+ public:
+  bool isMatch(const mllm::ir::op_ptr_t& op) override;
+  bool rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) override;
+
+  static inline std::shared_ptr<LLMQuantRecipeNativeGroupQueryAttentionPattern> create() {
+    return std::make_shared<LLMQuantRecipeNativeGroupQueryAttentionPattern>();
+  }
+};
+
 class LLMQuantRecipePass final : public ir::Pass {
  public:
   LLMQuantRecipePass();

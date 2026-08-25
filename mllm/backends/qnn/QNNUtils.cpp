@@ -316,7 +316,7 @@ Qnn_DataType_t mllmDataTypeToQnnDataType(DataTypes dtype) {
       break;
     }
     case kInt64: {
-      MLLM_ERROR_EXIT(ExitCode::kCoreError, "Int64 is not supported by QNN.");
+      ret = QNN_DATATYPE_INT_64;
       break;
     }
     case kUInt8: {

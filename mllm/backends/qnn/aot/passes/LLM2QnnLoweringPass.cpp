@@ -31,6 +31,7 @@
 #include "mllm/backends/qnn/aot/visitor/Repeat.hpp"
 #include "mllm/backends/qnn/aot/visitor/Softmax.hpp"
 #include "mllm/backends/qnn/aot/visitor/Where.hpp"
+#include "mllm/backends/qnn/aot/visitor/NativeGroupQueryAttention.hpp"
 
 namespace mllm::qnn::aot {
 
@@ -39,7 +40,8 @@ LLM2QnnLoweringPass::LLM2QnnLoweringPass() {
                    QnnAOTViewPattern, QnnAOTIndexPattern, QnnAOTGatherPattern, QnnAOTRMSNormPattern, QnnAOTLinearPattern,
                    QnnAOTTransposePattern, QnnAOTSlicePattern, QnnAOTConcatPattern, QnnAOTRepeatPattern, QnnAOTMatMulPattern,
                    QnnAOTReduceMaxPattern, QnnAOTReduceMinPattern, QnnAOTReduceMeanPattern, QnnAOTReduceSumPattern,
-                   QnnAOTEqualPattern, QnnAOTWherePattern, QnnAOTSoftmaxPattern, QnnAOTSigmoidPattern, QnnAOTConv2DPattern>();
+                   QnnAOTEqualPattern, QnnAOTWherePattern, QnnAOTSoftmaxPattern, QnnAOTSigmoidPattern, QnnAOTConv2DPattern,
+                   QnnAOTNativeGroupQueryAttentionPattern>();
 }
 
 uint8_t LLM2QnnLoweringPass::run(const ir::node_ptr_t& op) {
