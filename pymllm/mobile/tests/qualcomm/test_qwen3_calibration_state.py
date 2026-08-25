@@ -9,6 +9,7 @@ from pymllm.mobile.backends.qualcomm.transformers.core.qdq import (
 from pymllm.mobile.backends.qualcomm.transformers.core.qlinear import QLinearLPBQ
 from pymllm.mobile.backends.qualcomm.transformers.core.rms_norm import QRMSNorm
 from pymllm.mobile.backends.qualcomm.transformers.qwen3.runner import (
+    apply_activation_qparams_report,
     calibration_fake_quant_state,
     configure_calibration_fake_quant,
 )
@@ -58,3 +59,44 @@ def test_calibration_mode_is_validated():
         assert "Unsupported calibration mode" in str(exc)
     else:
         raise AssertionError("invalid calibration mode was accepted")
+
+
+def test_complete_activation_qparam_report_is_applied_exactly():
+    model = TinyQuantModel()
+    report = {
+        "activation_qparams": {
+            "activation": {
+                "bits": 8,
+                "quant_min": 0,
+                "quant_max": 255,
+                "min": -1.25,
+                "max": 2.75,
+                "scale": 4.0 / 255.0,
+                "zero_point": 80,
+            }
+        }
+    }
+
+    audit = apply_activation_qparams_report(model, report)
+
+    assert audit == {"applied": 1, "missing": 0, "extra": 0}
+    observer = model.activation.fake_quant.activation_post_process
+    assert observer.min_val.item() == -1.25
+    assert observer.max_val.item() == 2.75
+    assert model.activation.fake_quant.scale.item() == torch.tensor(
+        4.0 / 255.0, dtype=torch.float32
+    ).item()
+    assert model.activation.fake_quant.zero_point.item() == 80
+    assert model.activation.fake_quant.observer_enabled.item() == 0
+    assert model.activation.fake_quant.fake_quant_enabled.item() == 1
+
+
+def test_incomplete_activation_qparam_report_is_rejected():
+    model = TinyQuantModel()
+
+    try:
+        apply_activation_qparams_report(model, {"activation_qparams": {}})
+    except ValueError as exc:
+        assert "empty or malformed" in str(exc)
+    else:
+        raise AssertionError("incomplete qparam report was accepted")

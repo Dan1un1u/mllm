@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 from pathlib import Path
 
 import torch
@@ -22,6 +23,68 @@ from pymllm.mobile.backends.qualcomm.transformers.core.observer import ConcatObs
 
 
 CALIBRATION_MODES = ("legacy_minmax", "deployment_minmax")
+
+
+def _copy_scalar_buffer(buffer: torch.Tensor, value: float | int) -> None:
+    buffer.copy_(
+        torch.as_tensor(value, dtype=buffer.dtype, device=buffer.device).reshape_as(
+            buffer
+        )
+    )
+
+
+def apply_activation_qparams_report(model, report: dict) -> dict[str, int]:
+    """Apply a complete, audited ActivationQDQ report without changing topology."""
+    qparams = report.get("activation_qparams")
+    if not isinstance(qparams, dict) or not qparams:
+        raise ValueError("activation qparam report is empty or malformed")
+
+    modules = {
+        name: module
+        for name, module in model.named_modules()
+        if isinstance(module, ActivationQDQ)
+    }
+    missing = sorted(set(modules) - set(qparams))
+    extra = sorted(set(qparams) - set(modules))
+    if missing or extra:
+        raise ValueError(
+            "activation qparam module set mismatch: "
+            f"missing={missing[:5]} ({len(missing)}), "
+            f"extra={extra[:5]} ({len(extra)})"
+        )
+
+    for name, module in modules.items():
+        values = qparams[name]
+        expected_bits = int(module.bits)
+        if int(values.get("bits", expected_bits)) != expected_bits:
+            raise ValueError(f"activation bit mismatch at {name}")
+        if int(values.get("quant_min", module.fake_quant.quant_min)) != int(
+            module.fake_quant.quant_min
+        ) or int(values.get("quant_max", module.fake_quant.quant_max)) != int(
+            module.fake_quant.quant_max
+        ):
+            raise ValueError(f"activation quant range mismatch at {name}")
+
+        minimum = float(values["min"])
+        maximum = float(values["max"])
+        scale = float(values["scale"])
+        zero_point = int(values["zero_point"])
+        if not all(math.isfinite(value) for value in (minimum, maximum, scale)):
+            raise ValueError(f"non-finite activation qparam at {name}")
+        if minimum > maximum or scale <= 0:
+            raise ValueError(f"invalid activation range at {name}")
+        if not module.fake_quant.quant_min <= zero_point <= module.fake_quant.quant_max:
+            raise ValueError(f"activation zero point is outside range at {name}")
+
+        observer = module.fake_quant.activation_post_process
+        _copy_scalar_buffer(observer.min_val, minimum)
+        _copy_scalar_buffer(observer.max_val, maximum)
+        _copy_scalar_buffer(module.fake_quant.scale, scale)
+        _copy_scalar_buffer(module.fake_quant.zero_point, zero_point)
+        module.disable_observer()
+        module.enable_fakequant()
+
+    return {"applied": len(modules), "missing": 0, "extra": 0}
 
 
 def recompute_scale_zp(module):
@@ -357,6 +420,22 @@ class Qwen3Quantizer:
 
     def freeze_activation(self):
         self.model.apply(disable_qdq_observer)
+
+    def load_activation_qparams(self, report_path: str):
+        """Load frozen offline qparams while preserving the deployed graph contract."""
+        path = Path(report_path)
+        serialized = path.read_bytes()
+        report = json.loads(serialized)
+        self.enable_fake_quant()
+        audit = apply_activation_qparams_report(self.model, report)
+        audit.update(
+            {
+                "path": str(path),
+                "sha256": hashlib.sha256(serialized).hexdigest(),
+            }
+        )
+        print("Loaded activation qparams: " + json.dumps(audit, sort_keys=True))
+        return audit
 
     def enable_activation_update(self):
         self.model.apply(enable_qdq_observer)

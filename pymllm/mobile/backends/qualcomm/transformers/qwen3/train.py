@@ -44,6 +44,14 @@ def main():
         ),
     )
     parser.add_argument(
+        "--activation_qparams_report",
+        type=str,
+        help=(
+            "Complete offline ActivationQDQ report. When supplied, replay its "
+            "frozen qparams instead of running min-max calibration."
+        ),
+    )
+    parser.add_argument(
         "--infer_text",
         type=str,
         default="为什么伟大不能被计划",
@@ -81,12 +89,15 @@ def main():
             num_samples=args.num_samples,
             max_seq_length=args.max_length,
         )
-    m.calibrate(
-        args.calibration_corpus,
-        num_samples=args.num_samples,
-        max_seq_length=args.max_length,
-        calibration_mode=args.calibration_mode,
-    )
+    if args.activation_qparams_report:
+        m.load_activation_qparams(args.activation_qparams_report)
+    else:
+        m.calibrate(
+            args.calibration_corpus,
+            num_samples=args.num_samples,
+            max_seq_length=args.max_length,
+            calibration_mode=args.calibration_mode,
+        )
     m.validate_concat_observer()
     m.infer(args.infer_text, max_new_tokens=args.infer_max_new_tokens)
     m.convert()
