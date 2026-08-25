@@ -500,7 +500,7 @@ experiments:
   execution_state: completed
   evidence_validity: valid
   local_gate: fail
-  adoption_status: pending
+  adoption_status: rejected
   evidence_profile: micrograph-performance
   source_branches:
   - codex/exp-0017-native-u8-group-query-attention
@@ -530,3 +530,4 @@ experiments:
   evidence:
   - /mnt/d/llm_exp/results/exp0017_native_u8_group_query_attention_20260825
   - /mnt/d/llm_exp/models/exp0017_native_u8_group_query_attention/20260825-probes
+  decision_ref: 'User message 2026-08-25: 又失败了，登记为rejected。'
