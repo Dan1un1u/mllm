@@ -14,7 +14,7 @@ toolchain:
   backend: QNN AOT
   accelerator: HTP V79
 governance:
-  active_experiment: EXP-0017
+  active_experiment: null
   next_experiment_number: 18
   maximum_running_experiments: 1
   source_branch_pattern: codex/exp-<number>-<slug>

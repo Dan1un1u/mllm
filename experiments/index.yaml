@@ -497,14 +497,15 @@ experiments:
   title: Native U8 GroupQueryAttention lowering
   parent: EXP-0008
   variants: []
-  execution_state: running
-  evidence_validity: not_checked
-  local_gate: not_run
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: fail
   adoption_status: pending
   evidence_profile: micrograph-performance
   source_branches:
   - codex/exp-0017-native-u8-group-query-attention
-  source_commits: []
+  source_commits:
+  - a8fe651ccea933d46e7c690c2541ba609cfb83f9
   record: docs/experiments/EXP-0017.md
   distinct_from:
   - EXP-0009
@@ -526,3 +527,6 @@ experiments:
     source_worktree: /home/daniuniu/work/mllm-w4a8
     source_branch: codex/exp-0017-native-u8-group-query-attention
     started_on: '2026-08-25'
+  evidence:
+  - /mnt/d/llm_exp/results/exp0017_native_u8_group_query_attention_20260825
+  - /mnt/d/llm_exp/models/exp0017_native_u8_group_query_attention/20260825-probes
