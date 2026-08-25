@@ -461,7 +461,7 @@ experiments:
   execution_state: completed
   evidence_validity: valid
   local_gate: fail
-  adoption_status: pending
+  adoption_status: rejected
   evidence_profile: micrograph-performance
   source_branches:
   - codex/exp-0016-qhpi-sequential-hmx-gqa-core
@@ -490,3 +490,4 @@ experiments:
   - /mnt/d/llm_exp/results/exp0016_qhpi_sequential_hmx_gqa_core_20260825
   - /mnt/d/llm_exp/models/exp0016_qhpi_sequential_hmx_gqa_core/20260825-stage-a
   - /mnt/d/llm_exp/models/exp0016_qhpi_sequential_hmx_gqa_core/20260825-stage-b
+  decision_ref: 'User message 2026-08-25: 看来这个方向也不可行。'
