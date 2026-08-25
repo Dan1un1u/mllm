@@ -36,7 +36,8 @@ MLLM_MAIN({
   auto& profile_dir = Argparse::add<std::string>("--profile_dir").help("Profiling output directory.");
   auto& iterations = Argparse::add<int>("--iterations").help("Measured executions.").def(1);
   auto& profile_level = Argparse::add<std::string>("--profile_level").help("off or optrace.").def("optrace");
-  auto& pipeline = Argparse::add<std::string>("--pipeline").help("single or mixed-resource.").def("single");
+  auto& pipeline =
+      Argparse::add<std::string>("--pipeline").help("single, mixed-resource, or sequential-hmx.").def("single");
   auto& pattern = Argparse::add<std::string>("--pattern")
                       .help("structured, identity, permuted-signed, or map-weight diagnostic inputs.")
                       .def("structured");
@@ -48,11 +49,11 @@ MLLM_MAIN({
   }
   if (!context_path.isSet() || !graph_name.isSet() || !profile_dir.isSet() || iterations.get() <= 0
       || (profile_level.get() != "off" && profile_level.get() != "optrace")
-      || (pipeline.get() != "single" && pipeline.get() != "mixed-resource")
+      || (pipeline.get() != "single" && pipeline.get() != "mixed-resource" && pipeline.get() != "sequential-hmx")
       || (pattern.get() != "structured" && pattern.get() != "identity" && pattern.get() != "permuted-signed"
           && pattern.get() != "map-weight")
       || map_offset.get() < -1 || map_offset.get() >= static_cast<int>(kChannels * kChannels)
-      || (pipeline.get() == "mixed-resource" && pattern.get() == "map-weight")) {
+      || (pipeline.get() != "single" && pattern.get() == "map-weight")) {
     Argparse::printHelp();
     return 2;
   }
@@ -103,8 +104,10 @@ MLLM_MAIN({
     // EXP-0015 Stage A uses the final packed word as a TCM-only phase word.
     // Keep its four logical coefficients at zero; the device sees 0x80808080
     // after QNN applies the S8 tensor's physical offset.
-    std::fill(weight.ptr<int8_t>() + kChannels * kChannels - kPhaseWordBytes,
-              weight.ptr<int8_t>() + kChannels * kChannels, 0);
+    if (pipeline.get() == "mixed-resource") {
+      std::fill(weight.ptr<int8_t>() + kChannels * kChannels - kPhaseWordBytes,
+                weight.ptr<int8_t>() + kChannels * kChannels, 0);
+    }
   }
 
   std::vector<mllm::Tensor> inputs{activation, weight};
@@ -174,7 +177,7 @@ MLLM_MAIN({
       hvx_stage[index] = static_cast<uint8_t>(std::min(static_cast<int32_t>(first_stage[index]) + 1, 255));
     }
   }
-  if (pipeline.get() == "mixed-resource") {
+  if (pipeline.get() == "mixed-resource" || pipeline.get() == "sequential-hmx") {
     for (uint32_t spatial = 0; spatial < kSpatial; ++spatial) {
       for (uint32_t output_channel = 0; output_channel < kChannels; ++output_channel) {
         int32_t accumulator = 0;

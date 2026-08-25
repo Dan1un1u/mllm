@@ -117,3 +117,37 @@ TCM-tensor phase-word variant produces `ddrTensorSize=0`. The guarded
 `QHPI_MIXED_RESOURCE_AUDIT` and `QHPI_EXCLUSIVE_SINGLE_HMX_AUDIT` builds retain
 the minimal reproductions. Stage B must not be started unless the experiment
 contract is explicitly changed.
+
+## EXP-0016 sequential HMX plumbing mode
+
+`SequentialHmxHvxHmx` implements the approved single-callback alternative.
+It reserves `QHPI_RESOURCE_HMX` and issues this complete sequence from the one
+main-control callback used by QAIRT 2.49/V79:
+
+```text
+HMX U8xS8 -> output crouton
+HVX saturating byte add-one in place
+HMX U8xS8 -> consumed activation crouton
+HVX TCM copy -> output crouton
+```
+
+Compile with `--mode sequential-hmx` and run with
+`--pipeline sequential-hmx`. The extra final vector copy is required because
+V79 does not preserve the activation crouton when the second HMX tile uses the
+same block for input and output. An alias-audit build also established that
+QHPI's `source_destructive=true` permits the first input and output to share
+one physical block. The accepted implementation therefore keeps that
+descriptor false, requires distinct input/output blocks, and reuses the
+already-consumed activation block only after the first HMX tile.
+
+### QAIRT 2.49 / V79 Stage-A finding
+
+The Stage-A plumbing gate passes. Identity, signed-permutation, and structured
+inputs each remain byte-exact over ten target invocations. The cached context
+reports `ddrTensorSize=0` and `spillFillBufferSize=0`. Decoded Optrace reports
+the one `SequentialHmxHvxHmx` node as `hmx=true`, with custom-node DRAM read
+and write both zero. DSP disassembly independently contains two integer HMX
+tiles, the intervening HVX saturated add, and the final HVX TCM copy.
+
+This result proves only the one-node HMX/HVX scheduling and storage contract.
+It does not establish a complete GQA implementation or a speed result.

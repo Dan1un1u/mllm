@@ -23,7 +23,7 @@ COMMON_FLAGS := -std=c++17 -fPIC -Wall -Wextra -Werror -Wno-missing-field-initia
 	-D__QAIC_HEADER_EXPORT='__attribute__((visibility("default")))' $(EXTRA_FLAGS)
 
 SOURCES := $(SRC_DIR)/QhpiHmxProbePackageInterface.cpp $(SRC_DIR)/U8S8HmxMatMul.cpp \
-	$(SRC_DIR)/MixedResourceHmxHvxHmx.cpp
+	$(SRC_DIR)/MixedResourceHmxHvxHmx.cpp $(SRC_DIR)/SequentialHmxHvxHmx.cpp
 KERNEL_HEADER := $(INCLUDE_DIR)/HmxInt8Tile.hpp
 
 .PHONY: all htp_x86 htp_v79 htp_aarch64 emulation simulator clean
