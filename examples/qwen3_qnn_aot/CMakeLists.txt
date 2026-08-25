@@ -31,6 +31,14 @@ if(MLLM_QUALCOMM_QNN_AOT_ON_X86_ENABLE)
   add_executable(mllm-qhpi-u8-hmx-probe-c compile_qhpi_u8_hmx_probe.cpp)
   target_link_libraries(mllm-qhpi-u8-hmx-probe-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
   target_include_directories(mllm-qhpi-u8-hmx-probe-c PRIVATE ${MLLM_INCLUDE_DIR})
+
+  add_executable(mllm-qhpi-fused-gqa-c compile_qhpi_fused_gqa.cpp)
+  target_link_libraries(mllm-qhpi-fused-gqa-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+  target_include_directories(mllm-qhpi-fused-gqa-c PRIVATE ${MLLM_INCLUDE_DIR})
+
+  add_executable(mllm-native-gqa-c compile_native_gqa.cpp)
+  target_link_libraries(mllm-native-gqa-c PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+  target_include_directories(mllm-native-gqa-c PRIVATE ${MLLM_INCLUDE_DIR})
 endif()
 
 add_executable(mllm-qwen3-aot-runner aot_run.cpp)
@@ -44,3 +52,7 @@ target_include_directories(mllm-qwen3-lpbq-a16-a8-projection-runner PRIVATE ${ML
 add_executable(mllm-qhpi-u8-hmx-probe-runner run_qhpi_u8_hmx_probe.cpp)
 target_link_libraries(mllm-qhpi-u8-hmx-probe-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
 target_include_directories(mllm-qhpi-u8-hmx-probe-runner PRIVATE ${MLLM_INCLUDE_DIR})
+
+add_executable(mllm-qhpi-fused-gqa-runner run_qhpi_fused_gqa.cpp)
+target_link_libraries(mllm-qhpi-fused-gqa-runner PRIVATE MllmRT MllmCPUBackend MllmQNNBackend)
+target_include_directories(mllm-qhpi-fused-gqa-runner PRIVATE ${MLLM_INCLUDE_DIR})

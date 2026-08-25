@@ -23,10 +23,11 @@ COMMON_FLAGS := -std=c++17 -fPIC -Wall -Wextra -Werror -Wno-missing-field-initia
 	-D__QAIC_HEADER_EXPORT='__attribute__((visibility("default")))' $(EXTRA_FLAGS)
 
 SOURCES := $(SRC_DIR)/QhpiHmxProbePackageInterface.cpp $(SRC_DIR)/U8S8HmxMatMul.cpp \
-	$(SRC_DIR)/MixedResourceHmxHvxHmx.cpp $(SRC_DIR)/SequentialHmxHvxHmx.cpp
-KERNEL_HEADER := $(INCLUDE_DIR)/HmxInt8Tile.hpp
+	$(SRC_DIR)/MixedResourceHmxHvxHmx.cpp $(SRC_DIR)/SequentialHmxHvxHmx.cpp \
+	$(SRC_DIR)/FusedGqaHmxSoftmaxAv.cpp
+KERNEL_HEADER := $(INCLUDE_DIR)/HmxInt8Tile.hpp $(INCLUDE_DIR)/HmxGqaCore.hpp
 
-.PHONY: all htp_x86 htp_v79 htp_aarch64 emulation simulator clean
+.PHONY: all htp_x86 htp_v79 htp_aarch64 emulation scale_probe gqa_emulation simulator clean
 
 all: htp_x86 htp_v79 htp_aarch64
 
@@ -37,6 +38,10 @@ htp_v79: $(WORK)/hexagon-v79/$(LIBRARY_NAME)
 htp_aarch64: $(WORK)/aarch64-android/$(LIBRARY_NAME)
 
 emulation: $(WORK)/x86_64-linux-clang/hmx_int8_tile_emulation
+
+scale_probe: $(WORK)/x86_64-linux-clang/hmx_int8_scale_probe
+
+gqa_emulation: $(WORK)/x86_64-linux-clang/hmx_gqa_core_emulation
 
 simulator: $(WORK)/hexagon-v79/hmx_int8_tile_simulator
 
@@ -54,6 +59,14 @@ $(WORK)/x86_64-linux-clang/$(LIBRARY_NAME): $(SOURCES) $(KERNEL_HEADER) | $(WORK
 		-shared -o $@ $(SOURCES) -L$(QNN_HOST_LIB) -lQnnHtp
 
 $(WORK)/x86_64-linux-clang/hmx_int8_tile_emulation: tests/HmxInt8TileEmulation.cpp include/HmxInt8Tile.hpp | $(WORK)/x86_64-linux-clang
+	$(X86_CXX) -std=c++17 -Wall -Wextra -Werror -Wno-unused-parameter -D__HVXDBL__ -I$(INCLUDE_DIR) -I$(NATIVE_INCLUDE) \
+		-o $@ $< -Wl,--whole-archive -L$(NATIVE_LIB) -lnative -Wl,--no-whole-archive -lpthread
+
+$(WORK)/x86_64-linux-clang/hmx_int8_scale_probe: tests/HmxInt8ScaleProbe.cpp include/HmxInt8Tile.hpp | $(WORK)/x86_64-linux-clang
+	$(X86_CXX) -std=c++17 -Wall -Wextra -Werror -Wno-unused-parameter -D__HVXDBL__ -I$(INCLUDE_DIR) -I$(NATIVE_INCLUDE) \
+		-o $@ $< -Wl,--whole-archive -L$(NATIVE_LIB) -lnative -Wl,--no-whole-archive -lpthread
+
+$(WORK)/x86_64-linux-clang/hmx_gqa_core_emulation: tests/HmxGqaCoreEmulation.cpp include/HmxGqaCore.hpp include/HmxInt8Tile.hpp | $(WORK)/x86_64-linux-clang
 	$(X86_CXX) -std=c++17 -Wall -Wextra -Werror -Wno-unused-parameter -D__HVXDBL__ -I$(INCLUDE_DIR) -I$(NATIVE_INCLUDE) \
 		-o $@ $< -Wl,--whole-archive -L$(NATIVE_LIB) -lnative -Wl,--no-whole-archive -lpthread
 

@@ -338,6 +338,19 @@ class LLMQuantRecipeQwen3AttentionPattern : public ir::Pattern {
   }
 };
 
+//===----------------------------------------------------------------------===//
+// EXP-0016 fused GQA custom op pattern
+//===----------------------------------------------------------------------===//
+class LLMQuantRecipeFusedGqaPattern : public ir::Pattern {
+ public:
+  bool isMatch(const mllm::ir::op_ptr_t& op) override;
+  bool rewrite(ir::IRWriter& writer, const ir::op_ptr_t& node) override;
+
+  static inline std::shared_ptr<LLMQuantRecipeFusedGqaPattern> create() {
+    return std::make_shared<LLMQuantRecipeFusedGqaPattern>();
+  }
+};
+
 class LLMQuantRecipePass final : public ir::Pass {
  public:
   LLMQuantRecipePass();
