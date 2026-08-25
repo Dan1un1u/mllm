@@ -458,7 +458,7 @@ experiments:
   title: QHPI sequential HMX-HVX-HMX GQA core
   parent: EXP-0015
   variants: []
-  execution_state: proposed
+  execution_state: approved
   evidence_validity: not_checked
   local_gate: not_run
   adoption_status: pending
@@ -478,5 +478,6 @@ experiments:
     whose equivalent-scope median device wall latency must be no slower than native
     before expansion.
   reopen_condition: not_applicable
-  decided_by: pending
+  decided_by: user
   decided_on: '2026-08-25'
+  approval_ref: 'User message 2026-08-25: 批准，继续实验'
