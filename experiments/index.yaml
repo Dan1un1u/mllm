@@ -458,14 +458,15 @@ experiments:
   title: QHPI sequential HMX-HVX-HMX GQA core
   parent: EXP-0015
   variants: []
-  execution_state: running
-  evidence_validity: not_checked
-  local_gate: not_run
+  execution_state: completed
+  evidence_validity: valid
+  local_gate: fail
   adoption_status: pending
   evidence_profile: micrograph-performance
   source_branches:
   - codex/exp-0016-qhpi-sequential-hmx-gqa-core
-  source_commits: []
+  source_commits:
+  - 248f257754b976b329c080b808a79ad784b167dd
   record: docs/experiments/EXP-0016.md
   distinct_from:
   - EXP-0009
@@ -485,3 +486,7 @@ experiments:
     source_worktree: /home/daniuniu/work/mllm-w4a8
     source_branch: codex/exp-0016-qhpi-sequential-hmx-gqa-core
     started_on: '2026-08-25'
+  evidence:
+  - /mnt/d/llm_exp/results/exp0016_qhpi_sequential_hmx_gqa_core_20260825
+  - /mnt/d/llm_exp/models/exp0016_qhpi_sequential_hmx_gqa_core/20260825-stage-a
+  - /mnt/d/llm_exp/models/exp0016_qhpi_sequential_hmx_gqa_core/20260825-stage-b
